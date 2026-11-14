@@ -1,0 +1,44 @@
+# ── 本地数据与产物：不进仓库 ──────────────────────────────
+# 书籍正文、合成缓存、日志、打包输出、旧版 Python 服务端与虚拟环境
+/data/
+/dist/
+/logs/
+/venv/
+/engines/
+/scripts/
+/shots-20261113/
+/.claude/
+/tmp/
+
+# ── Flutter 构建缓存 ─────────────────────────────────────
+/app/build/
+/app/.dart_tool/
+/app/.flutter-plugins-dependencies
+/app/.idea/
+/app/*.iml
+/app/android/.gradle/
+/app/android/.kotlin/
+/app/android/local.properties
+/app/android/app/debug/
+/app/android/app/profile/
+/app/android/app/release/
+/app/windows/flutter/ephemeral/
+
+# ── 测试产物 ─────────────────────────────────────────────
+/app/test/failures/
+
+# ── 离线语音模型（Kokoro-82M-v1.1-zh int8，约 177MB）──────
+# 体积超过 GitHub 单文件 100MB 限制，也不该塞进 git 历史。
+# 克隆后先跑 tool/fetch_model.sh（或 .ps1）把它们下载到 assets/tts/。
+/app/assets/tts/model.int8.onnx
+/app/assets/tts/voices.bin
+/app/assets/tts/tokens.txt
+/app/assets/tts/lexicon-zh.txt
+/app/assets/tts/lexicon-us-en.txt
+/app/assets/tts/lexicon-gb-en.txt
+/app/assets/tts/date-zh.fst
+/app/assets/tts/number-zh.fst
+/app/assets/tts/phone-zh.fst
+
+# 旧版 PC 服务端（v2 时代）：App 已不依赖，路径也写死了本机
+/server/
