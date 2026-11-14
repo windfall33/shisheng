@@ -41,29 +41,33 @@ BookIR _ir(String title, int chapters) {
         title: '第 ${i + 1} 章 ${tails[i % tails.length]}',
         file: '',
         line: 0,
+        // 每章按 30 段重复铺开：截图里的「3 章 · X 分」要像一本真书，
+        // 只用三句话的话页头会显示「3 章 · 33 秒」，看着像坏了。
         segments: <Segment>[
-          Segment(
-            seq: i * 3,
-            text: '邑有王生，行七，故家子。少慕道，闻劳山多仙人，负笈往游。',
-            type: 'narration',
-            para: 0,
-            chapterSeq: i,
-          ),
-          Segment(
-            seq: i * 3 + 1,
-            text: '“弟子操作多日，师略授小技。”',
-            type: 'dialogue',
-            speaker: '王生',
-            para: 1,
-            chapterSeq: i,
-          ),
-          Segment(
-            seq: i * 3 + 2,
-            text: '过月余，手足重茧，不堪其苦，阴有归志。',
-            type: 'narration',
-            para: 2,
-            chapterSeq: i,
-          ),
+          for (var r = 0; r < 30; r++) ...<Segment>[
+            Segment(
+              seq: (i * 30 + r) * 3,
+              text: '邑有王生，行七，故家子。少慕道，闻劳山多仙人，负笈往游。登一顶，有观宇甚幽。一道士坐蒲团上，素发垂领，而神光爽迈。',
+              type: 'narration',
+              para: r * 3,
+              chapterSeq: i,
+            ),
+            Segment(
+              seq: (i * 30 + r) * 3 + 1,
+              text: '“弟子操作多日，师略授小技，此来为不负也。”',
+              type: 'dialogue',
+              speaker: '王生',
+              para: r * 3 + 1,
+              chapterSeq: i,
+            ),
+            Segment(
+              seq: (i * 30 + r) * 3 + 2,
+              text: '过月余，手足重茧，不堪其苦，阴有归志。',
+              type: 'narration',
+              para: r * 3 + 2,
+              chapterSeq: i,
+            ),
+          ],
         ],
       ),
     );
@@ -131,7 +135,9 @@ void main() {
 
   final b1 = () {
     final ir = _ir('聊斋志异·卷一', 3);
-    return BookItem('preview-1', ir, 3, 540000, lastSeq: 0, lastPosMs: 42000);
+    // 只有第 1 章整章合成过：页头「已生成」要跟下面三行的状态一致，
+    // 不能写着 100% 而两章还在「优先合成」。
+    return BookItem('preview-1', ir, 1, 492000, lastSeq: 0, lastPosMs: 42000);
   }();
   final b2 = () {
     final ir = _ir('聊斋志异·卷二', 3);

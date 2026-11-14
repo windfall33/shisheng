@@ -15,7 +15,7 @@ Future<void> main(List<String> args) async {
   final t0 = DateTime.now();
   await eng.start();
   print('engine start: ${DateTime.now().difference(t0).inMilliseconds}ms');
-  const text = '韩立盘膝而坐，缓缓睁开双眼。一名青衫少女笑道：师弟，你终于醒了。';
+  const text = '邑有王生，行七，故家子。少慕道，闻劳山多仙人。道士曰：“恐娇情不能作苦。”';
   final r = await eng.synth(text, 102, outPath: out);
   if (!r.ok) {
     print('SYNTH FAIL: ${r.error}');
