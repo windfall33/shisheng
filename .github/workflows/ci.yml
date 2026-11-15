@@ -18,15 +18,25 @@ jobs:
           channel: stable
           cache: true
       # pub.dev 对 GitHub runner 的 IP 偶发 429 限流：重试 + 强制锁文件。
+      # 失败时把日志末尾写进 Step Summary（公开页可读，匿名诊断不用管理员权限）。
       - name: flutter pub get
         run: |
-          n=0
-          until flutter pub get --enforce-lockfile; do
-            n=$((n+1))
-            if [ $n -ge 3 ]; then exit 1; fi
-            echo "::warning::pub get 第 $n 次失败，15 秒后重试"
+          set +e
+          for i in 1 2 3; do
+            flutter pub get --enforce-lockfile > pubget.log 2>&1
+            if [ $? -eq 0 ]; then exit 0; fi
+            echo "::warning::pub get 第 $i 次失败，15 秒后重试"
             sleep 15
           done
+          {
+            echo '### flutter pub get 失败诊断'
+            echo '```'
+            tail -60 pubget.log
+            echo '```'
+            flutter --version
+            dart --version
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - run: flutter analyze
       # --concurrency=1：套件串行，避开 Windows 本机偶发的测试挂起竞态。
       - run: flutter test --exclude-tags=golden --concurrency=1
