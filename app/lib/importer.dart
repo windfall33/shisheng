@@ -23,14 +23,15 @@ String newBookId(String title) {
 Future<(String, BookIR)?> importTxt() async {
   // ignore: avoid_print
   print('import: opening picker');
-  final r = await FilePicker.platform.pickFiles(type: FileType.any);
+  // file_picker 13：静态入口，取消返回 null。
+  final picked = await FilePicker.pickFile(type: FileType.any);
   // ignore: avoid_print
-  print('import: picker returned ${r?.files.length}');
-  final path = r?.files.single.path;
+  print('import: picked=${picked?.name}');
+  final path = picked?.path;
   // ignore: avoid_print
   print('import: path=$path');
   if (path == null) return null;
-  final name = r!.files.single.name;
+  final name = picked!.name;
   final raw = await _readPicked(path);
   // ignore: avoid_print
   print('import: read ${raw.length} bytes');

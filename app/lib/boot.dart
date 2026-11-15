@@ -6,9 +6,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'cleanup.dart';
 import 'engine.dart';
 import 'globals.dart' show prefs;
 import 'render.dart';
+import 'settings.dart';
 import 'store.dart';
 import 'textfront.dart';
 import 'tserver.dart';
@@ -90,6 +92,10 @@ class Boot {
       status = '就绪';
       ready = true;
       readyN.value = true;
+      // 启动后台清一次家务：超上限时把最久没听的章节/段缓存清掉。
+      // 失败静默——清理不该打断听书。
+      // ignore: unawaited_futures
+      _startupCleanup();
     } catch (e) {
       error = e.toString();
       status = '初始化失败';
@@ -104,6 +110,13 @@ class Boot {
       // ignore: unawaited_futures
       r.touch(bid, c.seq, Renderer.priAuto);
     }
+  }
+
+  static Future<void> _startupCleanup() async {
+    try {
+      final cap = AppSettings.instance.storageCapMb.value * 1024 * 1024;
+      await Cleanup.enforce(capBytes: cap, reason: 'startup');
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------- 桌面预览数据

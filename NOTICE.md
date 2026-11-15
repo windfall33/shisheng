@@ -11,12 +11,14 @@
 | [Kokoro-82M-v1.1-zh](https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1) int8 | v1.1 | Apache-2.0 | 中文多音色 TTS 模型（102 个音色，24kHz） | 下载到 `app/assets/tts/`，不入库 |
 | [just_audio](https://pub.dev/packages/just_audio) | 0.10.6 | MIT | 播放器 | `app/pubspec.yaml` |
 | [audio_service](https://pub.dev/packages/audio_service) | 0.18.19 | MIT | 锁屏/通知栏媒体控制 | `app/pubspec.yaml` |
-| [file_picker](https://pub.dev/packages/file_picker) | 10.x | MIT | 选择 TXT 文件 | `app/pubspec.yaml` |
+| [file_picker](https://pub.dev/packages/file_picker) | 13.x | MIT | 选择 TXT 文件 | `app/pubspec.yaml` |
 | [archive](https://pub.dev/packages/archive) | 4.x | MIT | 切章/打包工具链 | `app/pubspec.yaml` |
 | [shared_preferences](https://pub.dev/packages/shared_preferences) | 2.3.x | BSD-3-Clause | 设置持久化 | `app/pubspec.yaml` |
 | [path_provider](https://pub.dev/packages/path_provider) | 2.1.x | BSD-3-Clause | 应用私有目录 | `app/pubspec.yaml` |
 | [fast_gbk](https://pub.dev/packages/fast_gbk) | 1.0.0 | BSD-3-Clause | GBK 编码 TXT 解码 | `app/pubspec.yaml` |
 | [crypto](https://pub.dev/packages/crypto) / [http](https://pub.dev/packages/http) | 3.0.x / 1.x | BSD-3-Clause | 摘要与网络请求 | `app/pubspec.yaml` |
+| [share_plus](https://pub.dev/packages/share_plus) | 13.x | BSD-3-Clause | 导出性能日志走系统分享 | `app/pubspec.yaml` |
+| [device_info_plus](https://pub.dev/packages/device_info_plus) | 13.x | BSD-3-Clause | 导出日志附机型信息 | `app/pubspec.yaml` |
 
 ## 字体
 

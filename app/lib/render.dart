@@ -11,9 +11,12 @@ import 'package:crypto/crypto.dart';
 import 'dart:convert';
 
 import 'cloud_tts.dart';
+import 'cleanup.dart';
 import 'dsp.dart';
 import 'engine.dart';
+import 'perflog.dart';
 import 'pipeline.dart';
+import 'settings.dart';
 import 'store.dart';
 import 'textfront.dart';
 import 'voices.dart';
@@ -184,13 +187,27 @@ class Renderer {
       curBid = job.bid;
       curSeq = job.seq;
       _curPri = job.pri;
+      // 渲染前查预算：超上限先清再渲，防止预渲把自己挤爆存储。
+      // 排队中/正在渲的章不能清，从队列视图传给清理层。
+      try {
+        final pending = <String, Set<int>>{};
+        for (final j in _jobs) {
+          pending.putIfAbsent(j.bid, () => <int>{}).add(j.seq);
+        }
+        pending.putIfAbsent(job.bid, () => <int>{}).add(job.seq);
+        await Cleanup.enforce(
+          capBytes: AppSettings.instance.storageCapMb.value * 1024 * 1024,
+          reason: 'render',
+          extraProtected: pending,
+        );
+      } catch (_) {}
       var done = false;
       try {
         final ir = await Data.loadBook(job.bid);
         final voices = await Data.loadVoices(job.bid);
         if (ir != null && job.seq < ir.chapters.length) {
           done = await renderChapter(job.bid, ir, job.seq, voices,
-              yieldCheck: _hasHigherThanCurrent);
+              yieldCheck: _hasHigherThanCurrent, pri: job.pri);
         }
       } catch (e) {
         // ignore: avoid_print
@@ -212,8 +229,10 @@ class Renderer {
   }
 
   Future<bool> renderChapter(String bid, BookIR ir, int seq, BookVoices voices,
-      {bool Function()? yieldCheck}) async {
+      {bool Function()? yieldCheck, int pri = priAuto}) async {
     final chapter = ir.chapters[seq];
+    final sw = Stopwatch()..start();
+    var firstAudioLogged = false;
     var idx = (await Data.readIndex(bid, seq)) ?? <String, dynamic>{
       'seq': seq, 'blocks': <dynamic>[], 'done': false,
       'plan_blocks': 0, 'total_bytes': 0, 'total_ms': 0,
@@ -327,98 +346,112 @@ class Renderer {
         var failStreak = 0;
         for (var n = 0; n < jobs.length; n++) {
           final job = jobs[n];
-          Uint8List? pcm;
+          // 段缓存命中：直接吃缓存，不再进引擎（重拼便宜，重合成才贵）。
+          // 缓存格式由 key 决定：edge:* 存 i16，k<sid> 存 f32。
+          Uint8List? cached;
           if (await File(job.cp).exists()) {
-            final cached = await File(job.cp).readAsBytes();
-            if (cached.isNotEmpty) pcm = cached;
+            final bytes = await File(job.cp).readAsBytes();
+            if (bytes.isNotEmpty) cached = bytes;
           }
-          if (pcm != null) continue;
-          // 补满流水线：往后找未命中缓存的段派发。
-          // 返回值带上「这段音频实际是谁合成的」——云端失败会临时改用本机音色，
-          // 那时的采样是 f32（本机）而不是 s16（云端），落盘也必须落在本机音色的
-          // 缓存 key 下：写进 edge 的 key，下次联网就会直接命中一段 Kokoro 的声音，
-          // 时间轴还标着「云端音色」。
-          Future<_SegOut> dispatch(_SegJob j) async {
-            if (j.cloud) {
-              final r = await CloudTts.synth(j.text, j.edgeVoice,
-                  rate: j.edgeRate, pitch: j.edgePitch, outPath: '${j.cp}.tmp');
-              if (r.ok) {
+          Float32List samples;
+          var cloud = false;
+          _SegOut? out;
+          if (cached != null) {
+            cloud = job.cloud;
+            samples = cloud ? _i16ToF32(cached) : _f32Of(cached);
+          } else {
+            // 补满流水线：往后找未命中缓存的段派发。
+            // 返回值带上「这段音频实际是谁合成的」——云端失败会临时改用本机音色，
+            // 那时的采样是 f32（本机）而不是 s16（云端），落盘也必须落在本机音色的
+            // 缓存 key 下：写进 edge 的 key，下次联网就会直接命中一段 Kokoro 的声音，
+            // 时间轴还标着「云端音色」。
+            Future<_SegOut> dispatch(_SegJob j) async {
+              if (j.cloud) {
+                final r = await CloudTts.synth(j.text, j.edgeVoice,
+                    rate: j.edgeRate, pitch: j.edgePitch, outPath: '${j.cp}.tmp');
+                if (r.ok) {
+                  return _SegOut(
+                    TtsReply(0, true,
+                        sampleRate: RenderCfg.sampleRate,
+                        numSamples: r.numSamples),
+                    cloud: true,
+                    tmp: '${j.cp}.tmp',
+                    cp: j.cp,
+                  );
+                }
+                final lcp =
+                    await Data.cachePath(cacheKey(j.text, 'k${j.sid}', dirtyVer));
+                PerfLog.instance.record('cloud_fallback', <String, Object?>{
+                  'bid': bid, 'seq': seq, 'voice': j.edgeVoice, 'error': r.error,
+                });
+                CloudTts.noteFallback();
                 return _SegOut(
-                  TtsReply(0, true,
-                      sampleRate: RenderCfg.sampleRate,
-                      numSamples: r.numSamples),
-                  cloud: true,
-                  tmp: '${j.cp}.tmp',
-                  cp: j.cp,
+                  await engine.synth(j.text, j.sid,
+                      speed: 1.0, outPath: '$lcp.tmp'),
+                  cloud: false,
+                  tmp: '$lcp.tmp',
+                  cp: lcp,
                 );
               }
-              final lcp =
-                  await Data.cachePath(cacheKey(j.text, 'k${j.sid}', dirtyVer));
               return _SegOut(
                 await engine.synth(j.text, j.sid,
-                    speed: 1.0, outPath: '$lcp.tmp'),
+                    speed: 1.0, outPath: '${j.cp}.tmp'),
                 cloud: false,
-                tmp: '$lcp.tmp',
-                cp: lcp,
+                tmp: '${j.cp}.tmp',
+                cp: j.cp,
               );
             }
-            return _SegOut(
-              await engine.synth(j.text, j.sid,
-                  speed: 1.0, outPath: '${j.cp}.tmp'),
-              cloud: false,
-              tmp: '${j.cp}.tmp',
-              cp: j.cp,
-            );
-          }
 
-          if (inflight[n] == null) {
-            inflight[n] = dispatch(job);
-          }
-          for (var k = n + 1; k < jobs.length && inflight.length < depth; k++) {
-            if (inflight.containsKey(k)) continue;
-            if (await File(jobs[k].cp).exists()) continue;
-            inflight[k] = dispatch(jobs[k]);
-          }
-          final out = await inflight.remove(n)!;
-          final reply = out.reply;
-          if (!reply.ok || reply.numSamples == 0) {
-            failStreak++;
-            if (failStreak >= 5) {
-              idx['error'] = '连续 5 段合成失败：${reply.error ?? '未知原因'}';
-              break;
+            if (inflight[n] == null) {
+              inflight[n] = dispatch(job);
             }
-            continue;
-          }
-          failStreak = 0;
-          final raw = await File(out.tmp).readAsBytes();
-          Float32List samples;
-          if (out.cloud) {
-            final i16 = Int16List.view(
-                raw.buffer, raw.offsetInBytes, raw.lengthInBytes ~/ 2);
-            samples = Float32List(i16.length);
-            for (var q = 0; q < i16.length; q++) {
-              samples[q] = i16[q] / 32768.0;
+            for (var k = n + 1; k < jobs.length && inflight.length < depth; k++) {
+              if (inflight.containsKey(k)) continue;
+              if (await File(jobs[k].cp).exists()) continue;
+              inflight[k] = dispatch(jobs[k]);
             }
-            samples = shapeCloud(samples);
-          } else {
-            samples = Float32List.view(
-                raw.buffer, raw.offsetInBytes, raw.lengthInBytes ~/ 4);
-            samples = shapeAudio(samples);
+            out = await inflight.remove(n)!;
+            final reply = out.reply;
+            if (!reply.ok || reply.numSamples == 0) {
+              failStreak++;
+              if (failStreak >= 5) {
+                idx['error'] = '连续 5 段合成失败：${reply.error ?? '未知原因'}';
+                PerfLog.instance.record('render_error', <String, Object?>{
+                  'bid': bid, 'seq': seq, 'error': idx['error'],
+                });
+                break;
+              }
+              continue;
+            }
+            failStreak = 0;
+            final raw = await File(out.tmp).readAsBytes();
+            cloud = out.cloud;
+            samples = cloud ? _i16ToF32(raw) : _f32Of(raw);
           }
-          pcm = _f32ToS16(samples);
+          samples = cloud ? shapeCloud(samples) : shapeAudio(samples);
+          Uint8List pcm = _f32ToS16(samples);
           final prevSid = n > 0 ? jobs[n - 1].sid : null;
           final nextSid = n + 1 < jobs.length ? jobs[n + 1].sid : null;
           pcm = crossFadeEdges(pcm, sampleRate: RenderCfg.sampleRate, voiceFadeMs: RenderCfg.voiceFadeMs,
               fadeIn: prevSid != null && prevSid != job.sid,
               fadeOut: nextSid != null && nextSid != job.sid);
-          await File(out.tmp).rename(out.cp);
+          if (out != null) {
+            await File(out.tmp).rename(out.cp);
+          }
+          if (!firstAudioLogged) {
+            firstAudioLogged = true;
+            PerfLog.instance.record('render_first_audio', <String, Object?>{
+              'bid': bid, 'seq': seq,
+              'ms': sw.elapsedMilliseconds, 'pri': pri,
+            });
+          }
           sink.add(pcm);
           final durMs = pcm.length ~/ RenderCfg.bytesPerMs;
           segsMeta.add({
             'seq': job.seq, 'start_ms': posMs, 'end_ms': posMs + durMs,
             'voice': job.sid, 'type': job.type, 'speaker': job.speaker,
             // 索引里存原文：播放页显示的必须是书里那句话，不是送进引擎的规整文本
-            'backend': out.cloud ? 'edge' : 'local',
+            'backend': cloud ? 'edge' : 'local',
             'text': job.display.isEmpty ? job.text : job.display,
           });
           posMs += durMs;
@@ -447,6 +480,16 @@ class Renderer {
       idx['done'] = idx['error'] == null;
       idx['pipe'] = audioPipelineVersion;
       await Data.writeIndex(bid, seq, idx);
+      final audioMs = (idx['total_ms'] as num?)?.toInt() ?? 0;
+      PerfLog.instance.record('chapter_done', <String, Object?>{
+        'bid': bid, 'seq': seq, 'pri': pri,
+        'audio_ms': audioMs,
+        'wall_ms': sw.elapsedMilliseconds,
+        'rtf': audioMs > 0
+            ? sw.elapsedMilliseconds / audioMs
+            : 0,
+        'ok': idx['error'] == null,
+      });
       return idx['error'] == null;
     } finally {
       await sink.flush();
@@ -464,6 +507,20 @@ Uint8List _f32ToS16(Float32List samples) {
   }
   return out;
 }
+
+/// 云端缓存存的是 s16le；本机缓存存的是引擎原始 f32le。
+Float32List _i16ToF32(Uint8List raw) {
+  final i16 = Int16List.view(
+      raw.buffer, raw.offsetInBytes, raw.lengthInBytes ~/ 2);
+  final out = Float32List(i16.length);
+  for (var q = 0; q < i16.length; q++) {
+    out[q] = i16[q] / 32768.0;
+  }
+  return out;
+}
+
+Float32List _f32Of(Uint8List raw) =>
+    Float32List.view(raw.buffer, raw.offsetInBytes, raw.lengthInBytes ~/ 4);
 
 /// 老索引没记章级 backend：从第一段的 segs 里倒推。
 String? _firstBackend(Map<String, dynamic> idx) {

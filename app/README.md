@@ -23,6 +23,8 @@ flutter build apk --release
 | `lib/textfront.dart` | TXT → 章节 → 句子 → 说话人（旁白/对白） |
 | `lib/voices.dart` | 说话人 → 音色分配（同名恒定、男女/年龄/气质匹配） |
 | `lib/render.dart` | 渲染队列（NOW > USER > AUTO），逐块合成，写 `index.json` 时间轴 |
+| `lib/cleanup.dart` | 存储清理（容量上限 + LRU，两层记账） |
+| `lib/perflog.dart` | 性能日志（环形缓冲，JSONL 导出） |
 | `lib/engine.dart` | sherpa_onnx / Kokoro 的 isolate 池 |
 | `lib/tserver.dart` | 本地 127.0.0.1 虚拟 WAV 流，支持 Range 跳转 |
 | `lib/player.dart` | 播放页（当前句高亮、逐句跟读） |

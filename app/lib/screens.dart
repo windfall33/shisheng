@@ -1,13 +1,20 @@
 // 拾声 v4 · 书架、最近、设置、书籍详情/章节目录。
 import 'dart:async';
+import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'boot.dart';
+import 'cloud_tts.dart';
+import 'cleanup.dart';
 import 'design.dart';
 import 'globals.dart' show audioPlayer, prefs;
 import 'importer.dart';
 import 'models.dart';
+import 'perflog.dart';
 import 'playback.dart';
 import 'player.dart';
 import 'render.dart';
@@ -1302,6 +1309,21 @@ class SettingsScreen extends StatelessWidget {
                     ],
                   ),
                   _SettingSection(
+                    title: '存储',
+                    children: <Widget>[
+                      _ChoiceSetting<int>(
+                        title: '存储上限',
+                        note: '合成音频超过上限时，自动从最久没听的开始清理；正在听的前后几章不会动',
+                        values: const <int>[512, 1024, 2048, 4096, 0],
+                        label: _storageCapLabel,
+                        notifier: AppSettings.instance.storageCapMb,
+                        onChanged: AppSettings.instance.setStorageCapMb,
+                      ),
+                      const _StorageUsageRow(),
+                      const _ExportLogRow(),
+                    ],
+                  ),
+                  _SettingSection(
                     title: '音色',
                     children: <Widget>[
                       _ChoiceSetting<bool>(
@@ -1312,6 +1334,7 @@ class SettingsScreen extends StatelessWidget {
                         notifier: AppSettings.instance.cloudAllowed,
                         onChanged: AppSettings.instance.setCloudAllowed,
                       ),
+                      const _CloudStatusLine(),
                     ],
                   ),
                   _SettingSection(
@@ -1530,6 +1553,182 @@ class _ChoiceSetting<T> extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------- 书籍详情 / 章节目录
+
+String _storageCapLabel(int mb) {
+  if (mb == 0) return '不限';
+  if (mb < 1024) return '$mb MB';
+  return '${mb ~/ 1024} GB';
+}
+
+String _fmtBytes(int bytes) {
+  final mb = bytes / 1048576;
+  if (mb >= 1024) return '${(mb / 1024).toStringAsFixed(1)} GB';
+  return '${mb.toStringAsFixed(mb < 10 ? 1 : 0)} MB';
+}
+
+/// 当前占用 + 立即清理。审计失败（测试环境没有 path_provider）显示占位符。
+class _StorageUsageRow extends StatefulWidget {
+  const _StorageUsageRow();
+
+  @override
+  State<_StorageUsageRow> createState() => _StorageUsageRowState();
+}
+
+class _StorageUsageRowState extends State<_StorageUsageRow> {
+  StorageAudit? _audit;
+  bool _busy = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final a = await Cleanup.audit();
+      if (!mounted) return;
+      setState(() {
+        _audit = a;
+        _failed = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _audit = null;
+        _failed = true;
+      });
+    }
+  }
+
+  Future<void> _clean() async {
+    setState(() => _busy = true);
+    try {
+      final cap = AppSettings.instance.storageCapMb.value * 1024 * 1024;
+      final r = await Cleanup.enforce(capBytes: cap, reason: 'manual');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            r.ran
+                ? '已清理 ${_fmtBytes(r.freedBytes)}：章节 ${r.chaptersDeleted} 章、'
+                    '段缓存 ${r.cacheFilesDeleted} 段'
+                : '占用在上限内，没有需要清的',
+          ),
+        ),
+      );
+      await _refresh();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('清理失败，稍后再试')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return ListTile(
+      minVerticalPadding: AppSpace.sm,
+      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpace.xxl),
+      title: Text('当前占用', style: AppType.body.copyWith(color: t.text)),
+      subtitle: Text(
+        _failed ? '—' : (_audit == null ? '…' : _fmtBytes(_audit!.totalBytes)),
+        style: AppType.caption.copyWith(color: t.faint),
+      ),
+      trailing: _busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : AppPill('立即清理', onTap: _clean),
+    );
+  }
+}
+
+/// 导出性能日志：写 JSONL 到临时目录后走系统分享，不落「下载」那种要权限的目录。
+class _ExportLogRow extends StatelessWidget {
+  const _ExportLogRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return ListTile(
+      minVerticalPadding: AppSpace.sm,
+      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpace.xxl),
+      title: Text('导出性能日志', style: AppType.body.copyWith(color: t.text)),
+      subtitle: Text(
+        '首块等待、渲染耗时、云端回退、清理动作（JSONL）',
+        style: AppType.caption.copyWith(color: t.faint),
+      ),
+      onTap: () => _export(context),
+    );
+  }
+
+  Future<void> _export(BuildContext context) async {
+    try {
+      final meta = <String, Object?>{
+        'app': kAppVersion,
+        'os': Platform.operatingSystem,
+        'os_ver': Platform.operatingSystemVersion,
+        'device': await _deviceModel(),
+      };
+      final jsonl = PerfLog.instance.exportJsonl(meta);
+      final tmp = await getTemporaryDirectory();
+      final f = File(
+        '${tmp.path}${Platform.pathSeparator}'
+        'shisheng-perf-${DateTime.now().millisecondsSinceEpoch}.jsonl',
+      );
+      await f.writeAsString(jsonl, flush: true);
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(f.path)], title: '拾声性能日志'),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
+  }
+
+  Future<String> _deviceModel() async {
+    try {
+      if (Platform.isAndroid) {
+        final d = await DeviceInfoPlugin().androidInfo;
+        return '${d.manufacturer} ${d.model}';
+      }
+    } catch (_) {}
+    return Platform.operatingSystem;
+  }
+}
+
+/// 「音色来源」下的最近云端状态；没开过自动就一直空着。
+class _CloudStatusLine extends StatelessWidget {
+  const _CloudStatusLine();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return ValueListenableBuilder<String?>(
+      valueListenable: CloudTts.statusLine,
+      builder: (ctx, status, _) {
+        if (status == null || status.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.xxl,
+            0,
+            AppSpace.xxl,
+            AppSpace.sm,
+          ),
+          child: Text(status, style: AppType.caption.copyWith(color: t.faint)),
+        );
+      },
+    );
+  }
+}
 
 class ChaptersScreen extends StatefulWidget {
   final BookItem book;

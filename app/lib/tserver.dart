@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'perflog.dart';
 import 'render.dart';
 import 'store.dart';
 
@@ -44,6 +45,9 @@ class LocalServer {
     // 正在听 → NOW 优先
     // ignore: unawaited_futures
     Renderer.instance.touch(bid, seq, Renderer.priNow);
+    final entryAt = DateTime.now();
+    final audio = await Data.audioPcm(bid, seq);
+    _touchPlayed(audio, bid, seq);
     // 等首块
     Map<String, dynamic>? idx;
     final deadline = DateTime.now().add(const Duration(seconds: 90));
@@ -95,7 +99,7 @@ class LocalServer {
       delivered = 44;
       await res.flush();
     }
-    final audio = await Data.audioPcm(bid, seq);
+    var firstDataSent = false;
     while (endLimit == null || delivered < endLimit) {
       final dataPos = delivered - 44;
       idx = await Data.readIndex(bid, seq);
@@ -118,6 +122,13 @@ class LocalServer {
       try {
         await raf.setPosition(dataPos);
         final chunk = await raf.read(want);
+        if (!firstDataSent) {
+          firstDataSent = true;
+          PerfLog.instance.record('play_first_block', <String, Object?>{
+            'bid': bid, 'seq': seq,
+            'ms': DateTime.now().difference(entryAt).inMilliseconds,
+          });
+        }
         res.add(chunk);
         delivered += chunk.length;
         await res.flush();
@@ -126,6 +137,25 @@ class LocalServer {
       }
     }
     await res.close();
+  }
+
+  // LRU 的「最久没听」以播放为准：真正开始给播放器送数据的章摸一下 mtime，
+  // 之后清理层按 mtime 排就是按最近收听排。节流：同一章 30 秒内只摸一次。
+  static final Map<String, int> _touchAt = <String, int>{};
+
+  static void _touchPlayed(String path, String bid, int seq) {
+    final key = '$bid/$seq';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final last = _touchAt[key] ?? 0;
+    if (now - last < 30000) return;
+    _touchAt[key] = now;
+    if (_touchAt.length > 64) {
+      _touchAt.removeWhere((_, v) => now - v > 3600000);
+    }
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.setLastModified(DateTime.now());
+    } catch (_) {}
   }
 
   (int, int?) _parseRange(String? rangeH, bool done, int total) {

@@ -3,6 +3,7 @@
 // 设置里选「仅本机」时这里直接返回 false：一段都不会发出去。
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'cloud/edge_tts2/edge_tts2.dart';
@@ -21,6 +22,22 @@ class CloudTts {
   static bool? _lastAllowed;
   static const _ttl = Duration(minutes: 2);
 
+  /// 最近一次云端探测 / 回退的结果，给设置页「音色来源」下的状态行。
+  /// null = 还没探测过（用户没开过自动）。
+  static final ValueNotifier<String?> statusLine = ValueNotifier<String?>(null);
+
+  static void _noteStatus(String s) => statusLine.value = s;
+
+  static String _hhmm() {
+    final n = DateTime.now();
+    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 渲染层发现云端一段合成失败、已临时改用本机音色时调用。
+  static void noteFallback() {
+    _noteStatus('云端合成失败，已回退本机（$_hhmm()）');
+  }
+
   static Future<bool> available() async {
     final allowed = AppSettings.instance.cloudAllowed.value;
     if (!allowed) {
@@ -36,8 +53,12 @@ class CloudTts {
       final r = await InternetAddress.lookup('speech.platform.bing.com')
           .timeout(const Duration(seconds: 3));
       _online = r.isNotEmpty;
+      _noteStatus(_online
+          ? '云端正常（$_hhmm() 探测）'
+          : '云端不可用，用本机合成（$_hhmm() 探测）');
     } catch (_) {
       _online = false;
+      _noteStatus('云端不可用，用本机合成（$_hhmm() 探测）');
     }
     _checkedAt = now;
     return _online;

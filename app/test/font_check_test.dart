@@ -1,3 +1,7 @@
+// 字体走查 golden：只能在 Windows 基准环境跑，CI 排除。
+@Tags(['golden'])
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

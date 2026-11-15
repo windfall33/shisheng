@@ -1,5 +1,9 @@
 // 设计走查：用 390×844 的 golden 渲染固定三张关键页，便于逐轮对比。
 // 只在测试里注入假数据，不走 Data / 引擎 / 播放逻辑。
+// golden 依赖 Windows 基准环境，CI 只跑 --exclude-tags=golden。
+@Tags(['golden'])
+library;
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';

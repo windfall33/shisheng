@@ -16,6 +16,9 @@ class AppSettings {
   final ValueNotifier<double> defaultSpeed = ValueNotifier<double>(1.0);
   final ValueNotifier<int> sleepDefault = ValueNotifier<int>(30);
   final ValueNotifier<bool> autoRewind = ValueNotifier<bool>(true);
+  /// 合成音频的存储上限（MB），0 = 不限。超限时自动清最久没听的内容。
+  /// 档位和设置页保持一致：512 / 1024 / 2048 / 4096 / 0。
+  final ValueNotifier<int> storageCapMb = ValueNotifier<int>(1024);
   /// 音色来源：true = 自动（联网用云端、断网回退本机），false = 仅本机。
   /// 关掉它就是关掉所有出站合成请求，不是只关一路音色。
   ///
@@ -43,6 +46,7 @@ class AppSettings {
     sleepDefault.value = p.getInt('sleepDefault') ?? 30;
     autoRewind.value = p.getBool('autoRewind') ?? true;
     cloudAllowed.value = p.getBool('cloudAllowed') ?? false;
+    storageCapMb.value = p.getInt('storageCapMb') ?? 1024;
   }
 
   static ThemeMode? _themeMode(String? name) {
@@ -86,5 +90,10 @@ class AppSettings {
   Future<void> setCloudAllowed(bool value) async {
     cloudAllowed.value = value;
     await _p?.setBool('cloudAllowed', value);
+  }
+
+  Future<void> setStorageCapMb(int mb) async {
+    storageCapMb.value = mb;
+    await _p?.setInt('storageCapMb', mb);
   }
 }

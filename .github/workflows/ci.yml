@@ -1,0 +1,23 @@
+# CI：analyze + 非 golden 测试。golden 依赖 Windows 基准环境的字体渲染，
+# 在 Linux 上跑会假红，所以留在本地（@Tags(['golden']) 排除）。
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      # --concurrency=1：套件串行，避开 Windows 本机偶发的测试挂起竞态。
+      - run: flutter test --exclude-tags=golden --concurrency=1

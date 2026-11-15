@@ -2,11 +2,13 @@
 
 # 拾声
 
+[![CI](https://github.com/windfall33/shisheng/actions/workflows/ci.yml/badge.svg)](https://github.com/windfall33/shisheng/actions/workflows/ci.yml)
+
 **把一本 TXT 丢进去，它自己切章、分角色，在手机里合成，断网也能听。**
 
 Android · Flutter · 端侧 TTS · 无需账号
 
-[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.0
+[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.1
 
 </div>
 
@@ -73,6 +75,8 @@ flutter build apk --release
 | `app/lib/textfront.dart` | TXT → 章节 → 句子 → 说话人 |
 | `app/lib/voices.dart` | 说话人 → 音色（同名恒定、性别/年龄/气质匹配） |
 | `app/lib/render.dart` | 渲染队列 `NOW > USER > AUTO`，逐块合成，写 `index.json` 时间轴 |
+| `app/lib/cleanup.dart` | 存储清理：容量上限 + LRU（章节层先清，段缓存层兜底） |
+| `app/lib/perflog.dart` | 性能日志环形缓冲，导出 JSONL（设置页入口） |
 | `app/lib/engine.dart` | sherpa_onnx / Kokoro 的 isolate 池 |
 | `app/lib/tserver.dart` | `127.0.0.1` 虚拟 WAV 流，支持 Range 跳转（边合成边播的关键） |
 | `app/lib/player.dart` | 播放页 |
@@ -92,8 +96,9 @@ flutter build apk --release
 
 ## 已知问题
 
-- **存储清理没做**：合成音频只增不减，一本书听下来可能占几百 MB。目前只能靠系统设置里清应用数据。这是发布前必须补的。
-- **没有真机性能数据**：只在 Redmi K90（骁龙 8 系）上短时试过，不同机型上首次合成一章要多久、发热多少，没测过。
+- **真机性能数据还没采**：v1.0.1 起内置性能日志（设置 → 存储 → 导出性能日志），
+  各机型跑一轮导入 + 播放再导出，就能拿到首块等待和每章 RTF。目前只在
+  Redmi K90（骁龙 8 系）上短时试过。
 - 只解析 TXT，epub / mobi 不支持。
 - 音色是 TTS，不是真人配音；多音字、生僻字会读错，词典在 `assets/tts/lexicon-zh.txt`。
 
