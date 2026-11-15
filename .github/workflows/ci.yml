@@ -10,6 +10,10 @@ on:
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Flutter 工程在 app/ 子目录；不设这个，所有命令都在仓库根目录跑。
+        working-directory: app
     permissions:
       issues: write
     steps:
