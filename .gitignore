@@ -42,3 +42,9 @@
 
 # 旧版 PC 服务端（v2 时代）：App 已不依赖，路径也写死了本机
 /server/
+
+# 签名密钥与口令：绝不入库
+/keys/
+/app/android/key.properties
+*.jks
+*.keystore

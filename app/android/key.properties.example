@@ -1,0 +1,9 @@
+# 复制成 key.properties 再填自己的值。这个文件（key.properties）不进仓库。
+#
+# 生成密钥：
+#   keytool -genkeypair -v -keystore ../keys/release.jks -storetype JKS \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias shisheng
+storePassword=改成你的口令
+keyPassword=改成你的口令
+keyAlias=shisheng
+storeFile=../../keys/release.jks

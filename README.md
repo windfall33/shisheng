@@ -6,6 +6,8 @@
 
 Android · Flutter · 端侧 TTS · 无需账号
 
+[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.0
+
 </div>
 
 | 书架 | 目录 | 播放 |
@@ -48,11 +50,17 @@ bash tool/fetch_model.sh
 #   Windows: powershell -ExecutionPolicy Bypass -File tool\fetch_model.ps1
 #   国内网络: HF_ENDPOINT=https://hf-mirror.com bash tool/fetch_model.sh
 
-# 2. 构建
+# 2. 配一个自己的签名（仓库里不带密钥）
+bash tool/make_keystore.sh        # 生成 keys/release.jks 并写好 app/android/key.properties
+
+# 3. 构建
 cd app
 flutter pub get
 flutter build apk --release
 ```
+
+`--release` 必须能读到 `app/android/key.properties`，否则构建会停下并告诉你怎么生成；
+只想装在自己手机上试，用 `flutter build apk --debug` 也可以（包更大、更慢）。
 
 产物在 `app/build/app/outputs/flutter-apk/app-release.apk`（约 260MB，模型打进包里）。
 
@@ -85,7 +93,6 @@ flutter build apk --release
 ## 已知问题
 
 - **存储清理没做**：合成音频只增不减，一本书听下来可能占几百 MB。目前只能靠系统设置里清应用数据。这是发布前必须补的。
-- **release 用的是 debug 签名**，不能上架，只能自己装。
 - **没有真机性能数据**：只在 Redmi K90（骁龙 8 系）上短时试过，不同机型上首次合成一章要多久、发热多少，没测过。
 - 只解析 TXT，epub / mobi 不支持。
 - 音色是 TTS，不是真人配音；多音字、生僻字会读错，词典在 `assets/tts/lexicon-zh.txt`。

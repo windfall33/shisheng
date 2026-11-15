@@ -15,6 +15,7 @@ import 'settings.dart';
 import 'store.dart';
 import 'textfront.dart';
 import 'ui_kit.dart';
+import 'version.dart';
 
 Future<List<BookItem>> loadLibrary() async {
   final pairs = await Data.listBooks();
@@ -1328,7 +1329,7 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   _SettingSection(
                     title: '关于',
-                    trailing: '拾声 v3.0.0',
+                    trailing: '拾声 v$kAppVersion',
                     children: <Widget>[
                       ListTile(
                         minVerticalPadding: AppSpace.sm,
