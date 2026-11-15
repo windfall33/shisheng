@@ -10,6 +10,8 @@ on:
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -37,6 +39,26 @@ jobs:
             dart --version
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
+      # 失败时把 pubget.log 全文开成公开 issue：日志 API 要管理员权限，
+      # issue 匿名可读，诊断不需要用户手动贴日志。
+      - name: upload diagnostics
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+            const log = fs.existsSync('pubget.log')
+              ? fs.readFileSync('pubget.log', 'utf8').slice(-6000)
+              : '(pubget.log 不存在)';
+            let fv = '';
+            try { fv = execSync('flutter --version').toString(); } catch (e) { fv = 'flutter --version 失败: ' + e.message; }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CI 诊断 pub get 失败 ${context.sha.slice(0, 7)}（自动创建）`,
+              body: '```\n' + log + '\n```\n\n```\n' + fv + '\n```\n诊断用，阅后可删。'
+            });
       - run: flutter analyze
       # --concurrency=1：套件串行，避开 Windows 本机偶发的测试挂起竞态。
       - run: flutter test --exclude-tags=golden --concurrency=1
