@@ -26,6 +26,18 @@ class AppSettings {
   /// 对第三方朗读接口的逆向调用，随时可能失效，不该是默认行为。
   final ValueNotifier<bool> cloudAllowed = ValueNotifier<bool>(false);
 
+  /// 外接 VoiceStudio（可选）。关闭时一个请求都不发。
+  final ValueNotifier<bool> voiceStudioEnabled = ValueNotifier<bool>(false);
+  final ValueNotifier<String> voiceStudioUrl = ValueNotifier<String>('');
+  final ValueNotifier<String> voiceStudioKey = ValueNotifier<String>('');
+  final ValueNotifier<String> voiceStudioModel = ValueNotifier<String>(
+    'omnivoice',
+  );
+  final ValueNotifier<String> voiceStudioNarrationVoice =
+      ValueNotifier<String>('default');
+  final ValueNotifier<String> voiceStudioDialogueVoice =
+      ValueNotifier<String>('default');
+
   bool get ready => _p != null;
 
   /// 首次导入成功后只提示一次；测试/未初始化时视为已完成，避免打扰。
@@ -46,6 +58,14 @@ class AppSettings {
     sleepDefault.value = p.getInt('sleepDefault') ?? 30;
     autoRewind.value = p.getBool('autoRewind') ?? true;
     cloudAllowed.value = p.getBool('cloudAllowed') ?? false;
+    voiceStudioEnabled.value = p.getBool('vsEnabled') ?? false;
+    voiceStudioUrl.value = p.getString('vsUrl') ?? '';
+    voiceStudioKey.value = p.getString('vsKey') ?? '';
+    voiceStudioModel.value = p.getString('vsModel') ?? 'omnivoice';
+    voiceStudioNarrationVoice.value =
+        p.getString('vsNarrationVoice') ?? 'default';
+    voiceStudioDialogueVoice.value =
+        p.getString('vsDialogueVoice') ?? 'default';
     storageCapMb.value = p.getInt('storageCapMb') ?? 1024;
   }
 
@@ -90,6 +110,36 @@ class AppSettings {
   Future<void> setCloudAllowed(bool value) async {
     cloudAllowed.value = value;
     await _p?.setBool('cloudAllowed', value);
+  }
+
+  Future<void> setVoiceStudioEnabled(bool value) async {
+    voiceStudioEnabled.value = value;
+    await _p?.setBool('vsEnabled', value);
+  }
+
+  Future<void> setVoiceStudioUrl(String value) async {
+    voiceStudioUrl.value = value;
+    await _p?.setString('vsUrl', value);
+  }
+
+  Future<void> setVoiceStudioKey(String value) async {
+    voiceStudioKey.value = value;
+    await _p?.setString('vsKey', value);
+  }
+
+  Future<void> setVoiceStudioModel(String value) async {
+    voiceStudioModel.value = value;
+    await _p?.setString('vsModel', value);
+  }
+
+  Future<void> setVoiceStudioNarrationVoice(String value) async {
+    voiceStudioNarrationVoice.value = value;
+    await _p?.setString('vsNarrationVoice', value);
+  }
+
+  Future<void> setVoiceStudioDialogueVoice(String value) async {
+    voiceStudioDialogueVoice.value = value;
+    await _p?.setString('vsDialogueVoice', value);
   }
 
   Future<void> setStorageCapMb(int mb) async {

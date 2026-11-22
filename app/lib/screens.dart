@@ -1,6 +1,7 @@
 // 拾声 v4 · 书架、最近、设置、书籍详情/章节目录。
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ import 'store.dart';
 import 'textfront.dart';
 import 'ui_kit.dart';
 import 'version.dart';
+import 'voicestudio.dart';
 
 Future<List<BookItem>> loadLibrary() async {
   final pairs = await Data.listBooks();
@@ -62,6 +64,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool loading = true;
   bool importing = false;
   Map<String, dynamic>? last;
+  Map<int, Map<String, dynamic>> _nextStates =
+      <int, Map<String, dynamic>>{};
+  String? _npBid;
+  int? _npSeq;
 
   @override
   void initState() {
@@ -76,10 +82,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
               'pos': widget.previewPos,
             };
       loading = false;
+      final lb = widget.previewLast ??
+          (widget.previewBooks!.isNotEmpty
+              ? widget.previewBooks!.first
+              : null);
+      if (lb != null && lb.chapterCount > 0) {
+        final start = widget.previewSeq.clamp(0, lb.chapterCount - 1);
+        for (var s = start; s < math.min(start + 3, lb.chapterCount); s++) {
+          // 预览里摆出三种状态：当前章已合成、下一章没动、再下一章合成中。
+          if (s != start && s != start + 2) continue;
+          _nextStates[s] = <String, dynamic>{
+            'pipe': audioPipelineVersion,
+            'done': s == start,
+            'blocks': <dynamic>[],
+            'total_ms': 0,
+          };
+        }
+      }
     } else {
       last = lastPlayed();
+      _npBid = last?['bid'] as String?;
+      _npSeq = (last?['seq'] as num?)?.toInt();
+      NowPlaying.instance.addListener(_onNowPlaying);
       _load();
     }
+  }
+
+  @override
+  void dispose() {
+    if (widget.previewBooks == null) {
+      NowPlaying.instance.removeListener(_onNowPlaying);
+    }
+    super.dispose();
+  }
+
+  /// 只在本/章真的变了时刷新书签；进度每 500ms 的通知不读盘。
+  void _onNowPlaying() {
+    final np = NowPlaying.instance;
+    final bid = np.book?.bid;
+    if (bid == null) return;
+    if (bid == _npBid && np.seq == _npSeq) return;
+    _npBid = bid;
+    _npSeq = np.seq;
+    if (!mounted) return;
+    setState(() {
+      last = <String, dynamic>{
+        'bid': bid,
+        'seq': np.seq,
+        'pos': np.position.inMilliseconds,
+      };
+    });
+    unawaited(_loadNextStates());
   }
 
   Future<void> _load() async {
@@ -90,6 +143,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
       loading = false;
       last = lastPlayed();
     });
+    await _loadNextStates();
+  }
+
+  Future<void> _loadNextStates() async {
+    final lb = _lastBook;
+    if (lb == null || lb.chapterCount == 0) {
+      if (mounted && _nextStates.isNotEmpty) {
+        setState(() => _nextStates = <int, Map<String, dynamic>>{});
+      }
+      return;
+    }
+    final start = _lastSeq.clamp(0, lb.chapterCount - 1);
+    final end = math.min(start + 3, lb.chapterCount);
+    final states = <int, Map<String, dynamic>>{};
+    for (var s = start; s < end; s++) {
+      final idx = await Data.readIndex(lb.bid, s);
+      if (idx != null) states[s] = idx;
+    }
+    if (mounted) setState(() => _nextStates = states);
   }
 
   BookItem? get _lastBook {
@@ -102,13 +174,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   int get _lastSeq {
-    final s = (last?['seq'] as num?)?.toInt() ?? 0;
-    return s > 0 ? s : (_lastBook?.lastSeq ?? 0);
+    // 0 是合法章号（第一章），不能当成「没记录」再回退到旧进度。
+    final raw = last?['seq'];
+    if (raw is num) return raw.toInt();
+    return _lastBook?.lastSeq ?? 0;
   }
 
   int get _lastPos {
-    final p = (last?['pos'] as num?)?.toInt() ?? 0;
-    return p > 0 ? p : (_lastBook?.lastPosMs ?? 0);
+    final raw = last?['pos'];
+    if (raw is num) return raw.toInt();
+    return _lastBook?.lastPosMs ?? 0;
   }
 
   Future<void> _import() async {
@@ -302,6 +377,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               ),
                       ),
                     ),
+                    if (lastBook != null) ...<Widget>[
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpace.xxl,
+                            AppSpace.section,
+                            AppSpace.xxl,
+                            0,
+                          ),
+                          child: _NextUp(
+                            book: lastBook,
+                            fromSeq: _lastSeq,
+                            states: _nextStates,
+                            onTap: (seq) => _resume(
+                              lastBook,
+                              seq: seq,
+                              pos: seq == _lastSeq ? null : 0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(
@@ -567,6 +664,153 @@ class _ContinueHero extends StatelessWidget {
           ],
         ),
       ],
+      ),
+    );
+  }
+}
+
+/// 书架上的「书签」：当前章 + 后两章。
+///
+/// 这块不是装饰。原来书架在「全部」和「导入」之间留了一大片空白，而用户
+/// 最常做的事恰好在空白里：从第三章跳回第一章、看下一章合成了没有。
+/// 书签把这三章按书页顺序摆出来，状态直接写在行尾；点哪章听哪章。
+class _NextUp extends StatelessWidget {
+  final BookItem book;
+  final int fromSeq;
+  final Map<int, Map<String, dynamic>> states;
+  final ValueChanged<int> onTap;
+
+  const _NextUp({
+    required this.book,
+    required this.fromSeq,
+    required this.states,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final chapters = book.ir.chapters;
+    if (chapters.isEmpty) return const SizedBox.shrink();
+    final start = fromSeq.clamp(0, chapters.length - 1);
+    final end = math.min(start + 3, chapters.length);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            _Label('书签'),
+            const Spacer(),
+            Text(
+              '第 ${start + 1} / ${chapters.length} 章',
+              style: AppType.caption.copyWith(color: t.faint),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.xs),
+        for (var s = start; s < end; s++)
+          _BookmarkRow(
+            chapter: chapters[s],
+            seq: s,
+            active: s == fromSeq,
+            idx: states[s],
+            onTap: () => onTap(s),
+          ),
+      ],
+    );
+  }
+}
+
+class _BookmarkRow extends StatelessWidget {
+  final Chapter chapter;
+  final int seq;
+  final bool active;
+  final Map<String, dynamic>? idx;
+  final VoidCallback onTap;
+
+  const _BookmarkRow({
+    required this.chapter,
+    required this.seq,
+    required this.active,
+    required this.idx,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final fresh = idx?['pipe'] == audioPipelineVersion;
+    final done = idx?['done'] == true && fresh;
+    final rendering = idx != null && fresh && !done;
+    final status = active
+        ? '正在听'
+        : done
+        ? '已合成'
+        : rendering
+        ? '合成中'
+        : '待合成';
+    final statusColor = active
+        ? t.gold
+        : done
+        ? t.muted
+        : t.faint;
+
+    final raw = chapter.title.trim();
+    var title = raw;
+    if (raw.isNotEmpty) {
+      final stripped = raw.replaceFirst(
+        RegExp(
+          r'^第\s*[0-9０-９一二三四五六七八九十百千零两]+\s*[章回节]\s*[·、:：\-—]?\s*',
+        ),
+        '',
+      );
+      if (stripped.isNotEmpty) title = stripped;
+    }
+    if (title.isEmpty) title = '第 ${seq + 1} 章';
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: t.line, width: .5)),
+        ),
+        child: Row(
+          children: <Widget>[
+            // 当前章一条整行高的短金轨，和目录页同一种「正在播」标记。
+            Container(
+              width: 2,
+              height: 28,
+              color: active ? t.gold : Colors.transparent,
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 30,
+              child: Text(
+                '${seq + 1}'.padLeft(3, '0'),
+                style: AppType.caption.copyWith(
+                  color: t.faint,
+                  letterSpacing: .4,
+                  fontFeatures: tabularNums,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppType.book.copyWith(color: t.text),
+              ),
+            ),
+            const SizedBox(width: AppSpace.sm),
+            Text(
+              status,
+              style: AppType.meta.copyWith(color: statusColor),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1326,15 +1570,9 @@ class SettingsScreen extends StatelessWidget {
                   _SettingSection(
                     title: '音色',
                     children: <Widget>[
-                      _ChoiceSetting<bool>(
-                        title: '音色来源',
-                        note: '仅本机：全部在手机里合成，不联网。自动：联网时用云端音色，断网自动换回本机。',
-                        values: <bool>[true, false],
-                        label: _voiceSourceLabel,
-                        notifier: AppSettings.instance.cloudAllowed,
-                        onChanged: AppSettings.instance.setCloudAllowed,
-                      ),
+                      const _VoiceSourceSetting(),
                       const _CloudStatusLine(),
+                      const _VoiceStudioSettings(),
                     ],
                   ),
                   _SettingSection(
@@ -1373,25 +1611,35 @@ class SettingsScreen extends StatelessWidget {
                       // 隐私声明不是设置项，没有可点的动作，不值得占一条 ListTile。
                       // 它和版本号一起落在页脚：脚注就写在页面最底下。
                       ValueListenableBuilder<bool>(
-                        valueListenable: AppSettings.instance.cloudAllowed,
-                        builder: (ctx, allowCloud, _) => Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpace.xxl,
-                            AppSpace.sm,
-                            AppSpace.xxl,
-                            0,
-                          ),
-                          // 页脚说的是事实，不是承诺：选了「仅本机」就别再提云端。
-                          child: Text(
-                            allowCloud
-                                ? '书和进度留在本机。联网用云端音色，断网用本机音色。'
-                                : '书、进度和音频都留在本机，合成不联网。',
-                            style: AppType.caption.copyWith(
-                              color: t.faint,
-                              height: 1.6,
+                        valueListenable: AppSettings.instance.voiceStudioEnabled,
+                        builder: (ctx, voiceStudio, _) =>
+                            ValueListenableBuilder<bool>(
+                              valueListenable:
+                                  AppSettings.instance.cloudAllowed,
+                              builder: (ctx, allowCloud, _) {
+                                final line = voiceStudio
+                                    ? '书和进度留在本机。VoiceStudio 音色来自你指定的设备，连不上就换回本机。'
+                                    : allowCloud
+                                    ? '书和进度留在本机。联网用云端音色，断网用本机音色。'
+                                    : '书、进度和音频都留在本机，合成不联网。';
+                                return Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    AppSpace.xxl,
+                                    AppSpace.sm,
+                                    AppSpace.xxl,
+                                    0,
+                                  ),
+                                  // 页脚说的是事实，不是承诺。
+                                  child: Text(
+                                    line,
+                                    style: AppType.caption.copyWith(
+                                      color: t.faint,
+                                      height: 1.6,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                        ),
                       ),
                     ],
                   ),
@@ -1495,7 +1743,95 @@ class _ThemeModeSetting extends StatelessWidget {
   }
 }
 
-String _voiceSourceLabel(bool auto) => auto ? '自动' : '仅本机';
+enum _VoiceSource { local, auto, voiceStudio }
+
+/// 三路音色来源。这里不用 `_ChoiceSetting<bool>`：它只能表达两态，
+/// 而 VoiceStudio 是独立的第三路，不该被塞成「自动」的附属开关。
+class _VoiceSourceSetting extends StatelessWidget {
+  const _VoiceSourceSetting();
+
+  _VoiceSource get _current {
+    if (AppSettings.instance.voiceStudioEnabled.value) {
+      return _VoiceSource.voiceStudio;
+    }
+    return AppSettings.instance.cloudAllowed.value
+        ? _VoiceSource.auto
+        : _VoiceSource.local;
+  }
+
+  Future<void> _select(_VoiceSource source) async {
+    final s = AppSettings.instance;
+    switch (source) {
+      case _VoiceSource.local:
+        await s.setVoiceStudioEnabled(false);
+        await s.setCloudAllowed(false);
+        break;
+      case _VoiceSource.auto:
+        await s.setVoiceStudioEnabled(false);
+        await s.setCloudAllowed(true);
+        break;
+      case _VoiceSource.voiceStudio:
+        await s.setCloudAllowed(false);
+        await s.setVoiceStudioEnabled(true);
+        // 选完就探一次，地址没填时状态行会保持空白，不弹错误。
+        unawaited(VoiceStudioTts.available(force: true));
+        break;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[
+        AppSettings.instance.cloudAllowed,
+        AppSettings.instance.voiceStudioEnabled,
+      ]),
+      builder: (ctx, _) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.xxl,
+          AppSpace.sm,
+          AppSpace.xxl,
+          AppSpace.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('音色来源', style: AppType.body.copyWith(color: t.text)),
+            const SizedBox(height: 2),
+            Text(
+              '仅本机在手机里合成；自动联网用 Edge、断网回本机；'
+              '外接用你电脑上开着的 VoiceStudio（可克隆/设计音色）。',
+              style: AppType.caption.copyWith(color: t.faint, height: 1.5),
+            ),
+            const SizedBox(height: AppSpace.sm),
+            Wrap(
+              spacing: AppSpace.sm,
+              runSpacing: AppSpace.sm,
+              children: <Widget>[
+                AppPill(
+                  '仅本机',
+                  selected: _current == _VoiceSource.local,
+                  onTap: () => _select(_VoiceSource.local),
+                ),
+                AppPill(
+                  '自动',
+                  selected: _current == _VoiceSource.auto,
+                  onTap: () => _select(_VoiceSource.auto),
+                ),
+                AppPill(
+                  '外接 VoiceStudio',
+                  selected: _current == _VoiceSource.voiceStudio,
+                  onTap: () => _select(_VoiceSource.voiceStudio),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _ChoiceSetting<T> extends StatelessWidget {
   final String title;
@@ -1712,10 +2048,48 @@ class _CloudStatusLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    return ValueListenableBuilder<String?>(
-      valueListenable: CloudTts.statusLine,
-      builder: (ctx, status, _) {
-        if (status == null || status.isEmpty) return const SizedBox.shrink();
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppSettings.instance.voiceStudioEnabled,
+      builder: (ctx, voiceStudio, _) {
+        if (voiceStudio) return const SizedBox.shrink();
+        return ValueListenableBuilder<String?>(
+          valueListenable: CloudTts.statusLine,
+          builder: (ctx, status, _) {
+            if (status == null || status.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.xxl,
+                0,
+                AppSpace.xxl,
+                AppSpace.sm,
+              ),
+              child: Text(
+                status,
+                style: AppType.caption.copyWith(color: t.faint),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// 外接 VoiceStudio 的地址 / 密钥 / 音色。默认收起；选「外接 VoiceStudio」
+/// 才展开，不给只在本机听书的用户增加一排看不懂的输入框。
+class _VoiceStudioSettings extends StatelessWidget {
+  const _VoiceStudioSettings();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppSettings.instance.voiceStudioEnabled,
+      builder: (ctx, enabled, _) {
+        if (!enabled) return const SizedBox.shrink();
+        final s = AppSettings.instance;
         return Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpace.xxl,
@@ -1723,7 +2097,247 @@ class _CloudStatusLine extends StatelessWidget {
             AppSpace.xxl,
             AppSpace.sm,
           ),
-          child: Text(status, style: AppType.caption.copyWith(color: t.faint)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'VoiceStudio 地址',
+                style: AppType.body.copyWith(color: t.text),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '电脑端 → Local → Network 显示的地址，例如 '
+                'http://192.168.1.20:3900；有 API Key 就一起填。'
+                '手机和电脑要在同一个局域网。',
+                style: AppType.caption.copyWith(color: t.faint, height: 1.5),
+              ),
+              const SizedBox(height: AppSpace.sm),
+              _VsField(
+                label: '地址',
+                hint: 'http://192.168.1.20:3900',
+                value: s.voiceStudioUrl.value,
+                keyboard: TextInputType.url,
+                onChanged: s.setVoiceStudioUrl,
+              ),
+              const SizedBox(height: AppSpace.sm),
+              _VsField(
+                label: 'API Key（没有就留空）',
+                hint: 'Bearer token',
+                value: s.voiceStudioKey.value,
+                obscure: true,
+                onChanged: s.setVoiceStudioKey,
+              ),
+              const SizedBox(height: AppSpace.sm),
+              _VsField(
+                label: '模型 ID',
+                hint: 'omnivoice',
+                value: s.voiceStudioModel.value,
+                onChanged: s.setVoiceStudioModel,
+              ),
+              const SizedBox(height: AppSpace.sm),
+              _VsField(
+                label: '旁白音色 ID',
+                hint: 'default 或 VoiceStudio 里的 profile id',
+                value: s.voiceStudioNarrationVoice.value,
+                onChanged: s.setVoiceStudioNarrationVoice,
+              ),
+              const SizedBox(height: AppSpace.sm),
+              _VsField(
+                label: '对白音色 ID',
+                hint: 'default 或 VoiceStudio 里的 profile id',
+                value: s.voiceStudioDialogueVoice.value,
+                onChanged: s.setVoiceStudioDialogueVoice,
+              ),
+              const SizedBox(height: AppSpace.sm),
+              Wrap(
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
+                children: <Widget>[
+                  AppPill(
+                    '选旁白音色',
+                    onTap: () => _pickVoice(context, narration: true),
+                  ),
+                  AppPill(
+                    '选对白音色',
+                    onTap: () => _pickVoice(context, narration: false),
+                  ),
+                  AppPill(
+                    '测试连接',
+                    onTap: () =>
+                        unawaited(VoiceStudioTts.available(force: true)),
+                  ),
+                ],
+              ),
+              const _VoiceStudioStatusLine(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickVoice(
+    BuildContext context, {
+    required bool narration,
+  }) async {
+    final voices = await VoiceStudioTts.voices();
+    if (!context.mounted) return;
+    if (voices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('没拉到音色：先点「测试连接」，或在 VoiceStudio 里建一个音色'),
+        ),
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTokens.of(context).surface,
+      builder: (ctx) {
+        final tt = AppTokens.of(ctx);
+        return SafeArea(
+          top: false,
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: AppSpace.md),
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.xxl,
+                  AppSpace.lg,
+                  AppSpace.xxl,
+                  AppSpace.sm,
+                ),
+                child: Text(
+                  narration ? '选旁白音色' : '选对白音色',
+                  style: AppType.book.copyWith(color: tt.text),
+                ),
+              ),
+              for (final v in voices)
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpace.xxl,
+                  ),
+                  title: Text(
+                    v.name,
+                    style: AppType.body.copyWith(color: tt.text),
+                  ),
+                  subtitle: Text(
+                    v.id,
+                    style: AppType.caption.copyWith(color: tt.faint),
+                  ),
+                  onTap: () => Navigator.pop(ctx, v.id),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null || !context.mounted) return;
+    if (narration) {
+      await AppSettings.instance.setVoiceStudioNarrationVoice(picked);
+    } else {
+      await AppSettings.instance.setVoiceStudioDialogueVoice(picked);
+    }
+  }
+}
+
+class _VsField extends StatefulWidget {
+  final String label;
+  final String hint;
+  final String value;
+  final bool obscure;
+  final TextInputType? keyboard;
+  final ValueChanged<String> onChanged;
+
+  const _VsField({
+    required this.label,
+    required this.hint,
+    required this.value,
+    required this.onChanged,
+    this.obscure = false,
+    this.keyboard,
+  });
+
+  @override
+  State<_VsField> createState() => _VsFieldState();
+}
+
+class _VsFieldState extends State<_VsField> {
+  late final TextEditingController _c = TextEditingController(
+    text: widget.value,
+  );
+
+  @override
+  void didUpdateWidget(_VsField old) {
+    super.didUpdateWidget(old);
+    // 「选音色」会把 value 从外面改掉；控制器要跟上，否则输入框还显示旧 id。
+    if (widget.value != _c.text) {
+      _c.value = TextEditingValue(
+        text: widget.value,
+        selection: TextSelection.collapsed(offset: widget.value.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final radius = BorderRadius.circular(AppRadius.card);
+    return TextField(
+      controller: _c,
+      onChanged: widget.onChanged,
+      obscureText: widget.obscure,
+      keyboardType: widget.keyboard,
+      autocorrect: false,
+      enableSuggestions: false,
+      style: AppType.body.copyWith(color: t.text),
+      cursorColor: t.gold,
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: widget.label,
+        hintText: widget.hint,
+        labelStyle: AppType.caption.copyWith(color: t.faint),
+        hintStyle: AppType.caption.copyWith(color: t.whisper),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.md,
+          vertical: 13,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: radius,
+          borderSide: BorderSide(color: t.line, width: .8),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: radius,
+          borderSide: BorderSide(color: t.gold, width: 1),
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceStudioStatusLine extends StatelessWidget {
+  const _VoiceStudioStatusLine();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return ValueListenableBuilder<String?>(
+      valueListenable: VoiceStudioTts.statusLine,
+      builder: (ctx, status, _) {
+        if (status == null || status.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: AppSpace.sm),
+          child: Text(
+            status,
+            style: AppType.caption.copyWith(color: t.faint, height: 1.5),
+          ),
         );
       },
     );
@@ -1734,6 +2348,8 @@ class ChaptersScreen extends StatefulWidget {
   final BookItem book;
   final int? activeSeq;
   final bool preview;
+  /// 从播放器打开目录时只回传章号，不再叠一层播放器页。
+  final bool pickOnly;
   final Map<int, Map<String, dynamic>>? previewStates;
 
   const ChaptersScreen({
@@ -1741,6 +2357,7 @@ class ChaptersScreen extends StatefulWidget {
     required this.book,
     this.activeSeq,
     this.preview = false,
+    this.pickOnly = false,
     this.previewStates,
   });
 
@@ -1750,6 +2367,8 @@ class ChaptersScreen extends StatefulWidget {
 
 class _ChaptersScreenState extends State<ChaptersScreen> {
   final Map<int, Map<String, dynamic>> _state = <int, Map<String, dynamic>>{};
+  Timer? _refreshTimer;
+  bool _refreshing = false;
 
   @override
   void initState() {
@@ -1758,7 +2377,17 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
       _state.addAll(widget.previewStates ?? <int, Map<String, dynamic>>{});
     } else {
       _loadStates();
+      _refreshTimer = Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => _refreshStates(),
+      );
     }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadStates() async {
@@ -1769,13 +2398,92 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
     if (mounted) setState(() {});
   }
 
+  /// 目录页原来只在进入时扫一遍 index，合成完了也不更新；用户会看到
+  /// 「第三集还在合成中」然后过一会又响了。这里每 2 秒只重读：
+  ///   1. summary 里新完成的章；
+  ///   2. 当前章、后 3 章，以及已经出现在列表里的未完成章。
+  /// 不重扫整本书，几百章的书也不会因为翻目录一直读盘。
+  Future<void> _refreshStates() async {
+    if (_refreshing || !mounted) return;
+    _refreshing = true;
+    try {
+      var changed = false;
+      final summary = await Data.readSummary(widget.book.bid);
+      final doneMap = (summary?['chapters'] as Map?) ?? const <String, dynamic>{};
+      for (final c in widget.book.ir.chapters) {
+        final entry = doneMap['${c.seq}'];
+        if (entry is Map &&
+            entry['done'] == true &&
+            entry['pipe'] == audioPipelineVersion) {
+          final cur = _state[c.seq];
+          if (cur == null || cur['done'] != true) {
+            _state[c.seq] = Map<String, dynamic>.from(entry);
+            changed = true;
+          }
+        }
+      }
+
+      final focus = <int>{};
+      final active = widget.activeSeq;
+      if (active != null) {
+        for (var k = 0; k <= 3; k++) {
+          focus.add(active + k);
+        }
+      } else {
+        // 从书架打开的目录没有「当前章」，仍要看一眼自动预渲的前三章。
+        focus.addAll(<int>[0, 1, 2]);
+      }
+      for (final entry in _state.entries) {
+        if (entry.value['done'] != true) focus.add(entry.key);
+      }
+
+      for (final s in focus) {
+        if (s < 0 || s >= widget.book.ir.chapters.length) continue;
+        final idx = await Data.readIndex(widget.book.bid, s);
+        if (idx == null) continue;
+        final old = _state[s];
+        final same =
+            old != null &&
+            old['done'] == idx['done'] &&
+            (old['blocks'] as List?)?.length ==
+                (idx['blocks'] as List?)?.length &&
+            old['total_ms'] == idx['total_ms'] &&
+            old['plan_blocks'] == idx['plan_blocks'] &&
+            old['error'] == idx['error'];
+        if (!same) {
+          _state[s] = idx;
+          changed = true;
+        }
+      }
+      if (changed && mounted) setState(() {});
+    } finally {
+      _refreshing = false;
+    }
+  }
+
   void _play(int seq, {int ms = 0}) {
+    if (widget.pickOnly) {
+      Navigator.of(context).pop(seq);
+      return;
+    }
     Navigator.of(context).push(
       playerRoute(PlayerScreen(book: widget.book, startSeq: seq, startMs: ms)),
-    );
+    ).then((_) {
+      if (mounted) _loadStates();
+    });
   }
 
   Future<void> _prioritize(int seq) async {
+    // 先给一个「已插队」的本地状态，按钮不会在两秒刷新前还停在未合成。
+    setState(() {
+      _state[seq] = <String, dynamic>{
+        'pipe': audioPipelineVersion,
+        'done': false,
+        'blocks': <dynamic>[],
+        'total_ms': 0,
+        'plan_blocks': null,
+      };
+    });
     await Renderer.ensure(() => Boot.tts);
     await Renderer.instance.touch(widget.book.bid, seq, Renderer.priUser);
     if (!mounted) return;
@@ -1971,7 +2679,9 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: _NowPlayingBar(),
+      // 从播放器打开的目录只是选章器，底下已经有播放器页；
+      // 再放一条迷你播放器会让人能再叠一层播放器，回到错页。
+      bottomNavigationBar: widget.pickOnly ? null : _NowPlayingBar(),
     );
   }
 }

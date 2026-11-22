@@ -91,6 +91,38 @@ class NowPlaying extends ChangeNotifier {
   }
 }
 
+/// 全局播放所有权。
+///
+/// 播放器页可以被叠多层：从书架进播放器，再从播放器进目录，再从目录点另一章，
+/// 旧页仍然挂在路由栈里。旧页的 `audioPlayer.playerStateStream` 不会自己消失，
+/// 一旦上一章播完，它也会收到 `completed` 并把全局播放器切回自己那一章——
+/// 这就是「明明在等第一集，过一会却响起第三集」的根因。
+///
+/// 这里用一个小栈记录还活着的播放器页：只有栈顶那页可以改音源、写进度、
+/// 自动续章。新页压上来时旧页自动让位；新页退出后旧页重新拿回所有权。
+class PlaybackSession {
+  PlaybackSession._();
+
+  static final PlaybackSession instance = PlaybackSession._();
+
+  final List<Object> _owners = <Object>[];
+
+  Object? get owner => _owners.isEmpty ? null : _owners.last;
+  bool get hasOwner => _owners.isNotEmpty;
+
+  void claim(Object owner) {
+    _owners.removeWhere((o) => identical(o, owner));
+    _owners.add(owner);
+  }
+
+  void release(Object owner) {
+    _owners.removeWhere((o) => identical(o, owner));
+  }
+
+  bool owns(Object owner) =>
+      _owners.isNotEmpty && identical(_owners.last, owner);
+}
+
 /// 睡眠定时器独立于播放器页：收起播放器后仍然生效。
 class PlaybackSleep {
   PlaybackSleep._();

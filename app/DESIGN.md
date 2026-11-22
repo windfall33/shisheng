@@ -6,6 +6,20 @@
 >
 > 一句话：**播放器就是那本书，进度不是一根条，是光落在哪一句。**
 
+## v8 改了什么（本轮）
+
+这一版没有换世界，只把「书」这件事再往前推了一步，并给可选的外接音色留了入口。
+
+| 改动 | 位置 |
+|---|---|
+| 书架新增「书签」：当前章 + 后两章，按书页顺序排；行尾直接写「正在听 / 已合成 / 合成中 / 待合成」，当前章左侧一条 2px 金轨。点哪章听哪章，也把「从第三章跳回第一章」变成一次点击 | `lib/screens.dart` 的 `_NextUp` / `_BookmarkRow` |
+| 「音色来源」从两态改成三路：`仅本机` / `自动` / `外接 VoiceStudio`。外接是独立的第三路，不塞进「自动」的附属开关；默认仍然只在本机 | `lib/screens.dart` 的 `_VoiceSourceSetting` |
+| 外接 VoiceStudio 表单：地址、API Key、模型、旁白/对白音色，加「选旁白音色 / 选对白音色 / 测试连接」。默认收起，只在选「外接 VoiceStudio」时展开 | `lib/screens.dart` 的 `_VoiceStudioSettings` / `_VsField` |
+| 播放器页不再被旧页劫持：只有栈顶播放器拥有播放权，切章先停旧音源，`completed` 必须同时匹配当前页/书/章才续章 | `lib/playback.dart` 的 `PlaybackSession`、`lib/player.dart` |
+| 目录页每 2 秒刷新当前章、后 3 章和已开始章节的合成进度；从播放器进目录只回传章号，不再叠第二层播放器 | `lib/screens.dart` 的 `_ChaptersScreenState`、`lib/player.dart` 的 `_openChapters` |
+
+视觉约束没有变：仍然只有 6 档字号、两族字体、一个橙色动词色；新控件全部走现有 `AppTokens` / `AppSpace` / `AppRadius`，没有新开字号、没有阴影、没有渐变。书签的「正在听」是这一屏唯一的橙，和目录页同一种语言。
+
 ## v7 改了什么（本轮）
 
 这一版不是视觉改造，是**把「全程离线」这句假话换成一个能选的事实**。云端音色（Edge）原本

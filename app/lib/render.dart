@@ -20,6 +20,7 @@ import 'settings.dart';
 import 'store.dart';
 import 'textfront.dart';
 import 'voices.dart';
+import 'voicestudio.dart';
 
 export 'pipeline.dart' show audioPipelineVersion;
 
@@ -131,11 +132,14 @@ class Renderer {
   Future<bool> focus(String bid, int seq) async {
     _focusBid = bid;
     _focusSeq = seq;
+    // 同一本书里，用户没点的那几章不再保留旧优先级。否则先前「优先合成
+    // 第三集」的 USER 任务会一直排在「第一集」后面，看起来像队列没听指挥。
     for (final j in _jobs) {
       if (j.pri == priNow && !(j.bid == bid && j.seq == seq)) {
         j.pri = priUser;
       }
     }
+    _jobs.removeWhere((j) => j.bid == bid && j.seq != seq);
     if (curBid != null && !(curBid == bid && curSeq == seq) && _curPri == priNow) {
       _curPri = priUser;   // 正在渲的旧章降级 → 块边界让位
     }
@@ -264,8 +268,12 @@ class Renderer {
       return (sec * 1000).round();
     }();
     var posMs = (idx['total_ms'] as num?)?.toInt() ?? 0;
-    final cloudOn = await CloudTts.available();
-    final wantBackend = cloudOn ? 'edge' : 'local';
+    // 外接 VoiceStudio 优先；它没开/连不上时再走 Edge；最后才是端侧。
+    final voiceStudioOn = await VoiceStudioTts.available();
+    final cloudOn = !voiceStudioOn && await CloudTts.available();
+    final wantBackend = voiceStudioOn
+        ? 'voicestudio'
+        : (cloudOn ? 'edge' : 'local');
     // 音色来源被切换过：本章已渲的部分是另一种后端。一章里中途换人比从头再渲更糟，
     // 所以只保留已经渲完的章（音频已在本机，不再联网），渲了一半的整章重来。
     final hadBackend = idx['backend'] as String? ?? _firstBackend(idx);
@@ -293,6 +301,8 @@ class Renderer {
     final audioFile = File(audioPath);
     await audioFile.parent.create(recursive: true);   // 首次渲染时 audio/ 可能还不存在
     final sink = audioFile.openWrite(mode: FileMode.append);
+    // 一章只试一次 VoiceStudio：网络断了/超时就整章回本机，不在每个块重等。
+    var vsDown = false;
     try {
       for (var bidx = 0; bidx < blocks.length; bidx++) {
         if (doneBlockIds.contains(bidx)) continue;
@@ -321,6 +331,7 @@ class Renderer {
           var edgeVoice = '';
           var edgeRate = 1.0;
           var edgePitch = '+0Hz';
+          var vsVoice = '';
           if (cloudOn) {
             final prof = CloudTts.profile(
                 narration: seg.type == 'narration',
@@ -332,14 +343,28 @@ class Renderer {
             edgeRate = prof.rate;
             edgePitch = prof.pitch;
           }
-          final voiceKey = cloudOn
-              ? 'edge:$edgeVoice:${edgeRate.toStringAsFixed(2)}:$edgePitch'
-              : 'k$sid';
+          if (voiceStudioOn) {
+            // 目前按旁白 / 对白两路给音色；同一个说话人仍然恒定。
+            // 需要逐角色克隆时，在 VoiceStudio 里建 profile，再把 id 填进来。
+            vsVoice = seg.type == 'narration'
+                ? AppSettings.instance.voiceStudioNarrationVoice.value.trim()
+                : AppSettings.instance.voiceStudioDialogueVoice.value.trim();
+            if (vsVoice.isEmpty) vsVoice = 'default';
+          }
+          final vsModel =
+              AppSettings.instance.voiceStudioModel.value.trim();
+          final voiceKey = voiceStudioOn
+              ? 'vs:${VoiceStudioTts.endpointKey}:'
+                  '${vsModel.isEmpty ? 'omnivoice' : vsModel}:$vsVoice'
+              : (cloudOn
+                  ? 'edge:$edgeVoice:${edgeRate.toStringAsFixed(2)}:$edgePitch'
+                  : 'k$sid');
           final key = cacheKey(spoken, voiceKey, dirtyVer);
           final cp = await Data.cachePath(key);
           jobs.add(_SegJob(spoken, sid, key, cp, seg.seq, seg.type,
-              seg.speaker, seg.para, cloudOn, display: seg.text,
-              edgeVoice: edgeVoice, edgeRate: edgeRate, edgePitch: edgePitch));
+              seg.speaker, seg.para, cloudOn || voiceStudioOn, display: seg.text,
+              edgeVoice: edgeVoice, edgeRate: edgeRate, edgePitch: edgePitch,
+              voiceStudio: voiceStudioOn, vsVoice: vsVoice));
         }
         final depth = engine.workerCount.clamp(1, 4);
         final inflight = <int, Future<_SegOut>>{};
@@ -355,6 +380,7 @@ class Renderer {
           }
           Float32List samples;
           var cloud = false;
+          var backend = job.backend;
           _SegOut? out;
           if (cached != null) {
             cloud = job.cloud;
@@ -366,6 +392,48 @@ class Renderer {
             // 缓存 key 下：写进 edge 的 key，下次联网就会直接命中一段 Kokoro 的声音，
             // 时间轴还标着「云端音色」。
             Future<_SegOut> dispatch(_SegJob j) async {
+              Future<_SegOut> localOut() async {
+                final lcp =
+                    await Data.cachePath(cacheKey(j.text, 'k${j.sid}', dirtyVer));
+                return _SegOut(
+                  await engine.synth(j.text, j.sid,
+                      speed: 1.0, outPath: '$lcp.tmp'),
+                  cloud: false,
+                  backend: 'local',
+                  tmp: '$lcp.tmp',
+                  cp: lcp,
+                );
+              }
+
+              // VoiceStudio 一章里失败一次后，后面直接走本机，不再逐段等超时。
+              if (j.voiceStudio && vsDown) return localOut();
+              if (j.voiceStudio) {
+                final r = await VoiceStudioTts.synth(
+                  j.text,
+                  j.vsVoice,
+                  outPath: '${j.cp}.tmp',
+                );
+                if (r.ok) {
+                  return _SegOut(
+                    TtsReply(0, true,
+                        sampleRate: RenderCfg.sampleRate,
+                        numSamples: r.numSamples),
+                    cloud: true,
+                    backend: 'voicestudio',
+                    tmp: '${j.cp}.tmp',
+                    cp: j.cp,
+                  );
+                }
+                vsDown = true;
+                PerfLog.instance.record('cloud_fallback', <String, Object?>{
+                  'bid': bid,
+                  'seq': seq,
+                  'voice': 'vs:${j.vsVoice}',
+                  'error': r.error,
+                });
+                VoiceStudioTts.noteFallback();
+                return localOut();
+              }
               if (j.cloud) {
                 final r = await CloudTts.synth(j.text, j.edgeVoice,
                     rate: j.edgeRate, pitch: j.edgePitch, outPath: '${j.cp}.tmp');
@@ -375,31 +443,18 @@ class Renderer {
                         sampleRate: RenderCfg.sampleRate,
                         numSamples: r.numSamples),
                     cloud: true,
+                    backend: 'edge',
                     tmp: '${j.cp}.tmp',
                     cp: j.cp,
                   );
                 }
-                final lcp =
-                    await Data.cachePath(cacheKey(j.text, 'k${j.sid}', dirtyVer));
                 PerfLog.instance.record('cloud_fallback', <String, Object?>{
                   'bid': bid, 'seq': seq, 'voice': j.edgeVoice, 'error': r.error,
                 });
                 CloudTts.noteFallback();
-                return _SegOut(
-                  await engine.synth(j.text, j.sid,
-                      speed: 1.0, outPath: '$lcp.tmp'),
-                  cloud: false,
-                  tmp: '$lcp.tmp',
-                  cp: lcp,
-                );
+                return localOut();
               }
-              return _SegOut(
-                await engine.synth(j.text, j.sid,
-                    speed: 1.0, outPath: '${j.cp}.tmp'),
-                cloud: false,
-                tmp: '${j.cp}.tmp',
-                cp: j.cp,
-              );
+              return localOut();
             }
 
             if (inflight[n] == null) {
@@ -426,6 +481,7 @@ class Renderer {
             failStreak = 0;
             final raw = await File(out.tmp).readAsBytes();
             cloud = out.cloud;
+            backend = out.backend;
             samples = cloud ? _i16ToF32(raw) : _f32Of(raw);
           }
           samples = cloud ? shapeCloud(samples) : shapeAudio(samples);
@@ -451,7 +507,7 @@ class Renderer {
             'seq': job.seq, 'start_ms': posMs, 'end_ms': posMs + durMs,
             'voice': job.sid, 'type': job.type, 'speaker': job.speaker,
             // 索引里存原文：播放页显示的必须是书里那句话，不是送进引擎的规整文本
-            'backend': cloud ? 'edge' : 'local',
+            'backend': backend,
             'text': job.display.isEmpty ? job.text : job.display,
           });
           posMs += durMs;
@@ -537,10 +593,11 @@ String? _firstBackend(Map<String, dynamic> idx) {
 class _SegOut {
   final TtsReply reply;
   final bool cloud;
+  final String backend;
   final String tmp;
   final String cp;
   const _SegOut(this.reply, {required this.cloud, required this.tmp,
-      required this.cp});
+      required this.cp, this.backend = 'local'});
 }
 
 class _SegJob {
@@ -554,14 +611,21 @@ class _SegJob {
   final String? speaker;
   final int para;
   final bool cloud;
+  final bool voiceStudio;
   final String edgeVoice;
   final double edgeRate;
   final String edgePitch;
+  final String vsVoice;
+
+  String get backend => voiceStudio ? 'voicestudio' : (cloud ? 'edge' : 'local');
+
   _SegJob(this.text, this.sid, this.key, this.cp, this.seq, this.type,
       this.speaker, this.para, this.cloud,
       {this.display = '',
       this.edgeVoice = '',
       this.edgeRate = 1.0,
-      this.edgePitch = '+0Hz'});
+      this.edgePitch = '+0Hz',
+      this.voiceStudio = false,
+      this.vsVoice = ''});
 }
 

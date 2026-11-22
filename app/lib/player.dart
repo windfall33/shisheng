@@ -93,6 +93,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _wasPlaying = false;
   DateTime? _lastNpPosition;
   final ScrollController _pageScroll = ScrollController();
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
+  bool _claimed = false;
+  String? _loadedBid;
+  int? _loadedSeq;
+  bool _switching = false;
+  DateTime? _lastSaveAt;
 
   final NowPlaying now = NowPlaying.instance;
 
@@ -102,6 +109,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   bool hasNext(int s) => widget.book.ir.chapters.any((c) => c.seq == s + 1);
+
+  bool get _isOwner => mounted && PlaybackSession.instance.owns(this);
+
+  bool get _audioMatches =>
+      _loadedBid == widget.book.bid && _loadedSeq == seq;
 
   @override
   void initState() {
@@ -170,6 +182,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
     speed = prefs.getDouble('speed') ?? AppSettings.instance.defaultSpeed.value;
+    // 只有栈顶播放器页能碰全局 audioPlayer。后压上来的页会接管，
+    // 旧页仍在栈里时只负责显示，不再自动续章、不再写进度。
+    PlaybackSession.instance.claim(this);
+    _claimed = true;
 
     if (widget.attach && now.book?.bid == widget.book.bid) {
       seq = now.seq;
@@ -183,6 +199,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (audioPlayer.audioSource == null) {
         unawaited(playChapter(seq, seekMs: now.position.inMilliseconds));
       } else {
+        _loadedBid = widget.book.bid;
+        _loadedSeq = seq;
         if (audioPlayer.duration != null) {
           now.setDuration(audioPlayer.duration!);
         }
@@ -192,7 +210,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       unawaited(playChapter(widget.startSeq, seekMs: widget.startMs));
     }
 
-    audioPlayer.positionStream.listen((pos) {
+    _subs.add(audioPlayer.positionStream.listen((pos) {
+      // 旧页收不到新音源的事件；即使收到，也不许写全局进度。
+      if (!_isOwner) return;
+      if (_loadedSeq != null && !_audioMatches) return;
       final tick = DateTime.now();
       if (_lastNpPosition == null ||
           tick.difference(_lastNpPosition!).inMilliseconds >= 500) {
@@ -201,18 +222,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       _saveProgress(pos);
       _updateHighlight(pos);
-    });
-    audioPlayer.durationStream.listen((d) {
+    }));
+    _subs.add(audioPlayer.durationStream.listen((d) {
+      if (!_isOwner || _loadedSeq == null || !_audioMatches) return;
       if (d != null) now.setDuration(d);
-    });
-    audioPlayer.playingStream.listen((playing) {
+    }));
+    _subs.add(audioPlayer.playingStream.listen((playing) {
+      if (!_isOwner) return;
       now.setPlaying(playing);
       if (!playing) {
-        _pausedAt = DateTime.now();
+        // 切章时的 stop 不是「用户暂停」，不能拿它做 5 秒回退。
+        if (!_switching) _pausedAt = DateTime.now();
       } else {
         if (!_wasPlaying &&
             _pausedAt != null &&
-            AppSettings.instance.autoRewind.value) {
+            AppSettings.instance.autoRewind.value &&
+            !_switching &&
+            _audioMatches) {
           final gap = DateTime.now().difference(_pausedAt!);
           if (gap > const Duration(seconds: 30)) {
             final target = audioPlayer.position - const Duration(seconds: 5);
@@ -230,41 +256,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       _wasPlaying = playing;
       if (mounted) setState(() {});
-    });
-    audioPlayer.playerStateStream.listen((st) {
+    }));
+    _subs.add(audioPlayer.playerStateStream.listen((st) {
+      if (!_isOwner) return;
       final b = st.processingState == ProcessingState.buffering;
       now.setBuffering(b);
       if (buffering != b && mounted) setState(() => buffering = b);
-    });
-    audioPlayer.playerStateStream.listen((st) {
+    }));
+    _subs.add(audioPlayer.playerStateStream.listen((st) {
       if (st.processingState != ProcessingState.completed) return;
+      // 只有「这一页、这一章、这段音源」播完才续章。旧页的 completed
+      // 事件、切章中途的 completed 事件都不能改当前播放。
+      if (!_isOwner || _switching || waiting || !_audioMatches) return;
       if (PlaybackSleep.instance.endOfChapter) {
         unawaited(audioPlayer.pause());
         PlaybackSleep.instance.cancel();
         return;
       }
       if (hasNext(seq)) unawaited(playChapter(seq + 1));
-    });
+    }));
   }
 
   @override
   void dispose() {
     detailTimer?.cancel();
+    for (final s in _subs) {
+      unawaited(s.cancel());
+    }
+    _subs.clear();
+    if (_claimed) PlaybackSession.instance.release(this);
     _pageScroll.dispose();
     super.dispose();
   }
 
   Future<void> _saveProgress(Duration pos) async {
+    if (!_isOwner || !_audioMatches) return;
+    final now = DateTime.now();
+    if (_lastSaveAt != null &&
+        now.difference(_lastSaveAt!).inMilliseconds < 1500) {
+      return;
+    }
+    _lastSaveAt = now;
     await Data.saveProgress(widget.book.bid, <String, dynamic>{
       'seq': seq,
       'pos_ms': pos.inMilliseconds,
-      'updated_at': DateTime.now().millisecondsSinceEpoch / 1000,
+      'updated_at': now.millisecondsSinceEpoch / 1000,
     });
     await prefs.setString(
       'last',
       '{"bid":${_jstr(widget.book.bid)},"title":${_jstr(widget.book.title)},'
           '"seq":$seq,"pos":${pos.inMilliseconds},'
-          '"t":${DateTime.now().millisecondsSinceEpoch}}',
+          '"t":${now.millisecondsSinceEpoch}}',
     );
   }
 
@@ -322,7 +364,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _loadDetailLoop(int s) async {
     final idx = await Data.readIndex(widget.book.bid, s);
-    if (seq != s || !mounted) return;
+    if (!_isOwner || seq != s) return;
     if (idx == null) {
       setState(() => renderStat = '正在合成第一块…');
       now.setStatus(renderStat);
@@ -337,13 +379,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     timeline = tl;
     final done = idx['done'] == true;
     if (done) detailTimer?.cancel();
-    final edge = tl.any((e) => e['backend'] == 'edge');
+    final backends = tl.map((e) => e['backend']).toSet();
+    final edge = backends.contains('edge');
+    final voiceStudio = backends.contains('voicestudio');
+    final sourceTag = voiceStudio
+        ? '，VoiceStudio 音色'
+        : (edge ? '，云端音色' : '');
     setState(() {
       // 合成完了就不必再报一遍「已完整合成」——那行只在还没好、或音色来自云端时才有话说。
-      final tag = edge ? '，云端音色' : '';
       renderStat = done
-          ? (edge ? '云端音色' : '')
-          : '边播边合成 ${(idx['blocks'] as List).length}/${idx['plan_blocks']} 块$tag';
+          ? (voiceStudio
+              ? 'VoiceStudio 音色'
+              : (edge ? '云端音色' : ''))
+          : '边播边合成 ${(idx['blocks'] as List).length}/${idx['plan_blocks']} 块$sourceTag';
     });
     now.setStatus(renderStat);
     if (idx['total_ms'] != null) {
@@ -355,7 +403,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> playChapter(int s, {int seekMs = 0}) async {
     final chapter = widget.book.ir.chapter(s);
     if (chapter == null) return;
+    if (!PlaybackSession.instance.owns(this)) return;
     final token = ++playToken;
+    _switching = true;
+    _loadedBid = null;
+    _loadedSeq = null;
+    _pausedAt = null;
+    _wasPlaying = false;
+    _lastSaveAt = null;
+    waiting = false;
     detailTimer?.cancel();
     setState(() {
       seq = s;
@@ -370,6 +426,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
     unawaited(_loadDetailLoop(s));
 
+    // 先把旧章停掉，再去做任何可能耗时的事（读进度、等引擎、等首块）。
+    // 否则等第一集合成的那几十秒里，第三集还在后台响，甚至播完触发续章。
+    try {
+      await audioPlayer.stop();
+    } catch (_) {}
+    if (token != playToken || !mounted) return;
+
     if (Boot.preview) {
       await Future<void>.delayed(
         const Duration(milliseconds: 400),
@@ -381,6 +444,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           nextSeg = timeline[2];
         });
       }
+      _switching = false;
       return;
     }
 
@@ -397,7 +461,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     await Renderer.ensure(() => Boot.tts);
+    if (token != playToken || !mounted || !_isOwner) return;
     await Renderer.instance.focus(widget.book.bid, s);
+    if (token != playToken || !mounted || !_isOwner) return;
     for (var k = 1; k <= 3; k++) {
       if (widget.book.ir.chapter(s + k) != null) {
         unawaited(
@@ -406,7 +472,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    await audioPlayer.pause();
     setState(() => waiting = true);
     now.setStatus('正在准备音频…');
 
@@ -436,9 +501,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    if (token != playToken || !mounted) return;
+    if (token != playToken || !mounted || !_isOwner) return;
     if (!hasData) {
       setState(() => waiting = false);
+      _switching = false;
       final err = widx?['error'];
       setState(() => renderStat = err != null ? '合成失败' : '等待超时');
       now.setStatus(renderStat);
@@ -466,7 +532,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
     try {
       await audioPlayer.setAudioSource(src);
-      if (token != playToken || !mounted) return;
+      if (token != playToken || !mounted || !_isOwner) return;
+      _loadedBid = widget.book.bid;
+      _loadedSeq = s;
+      _switching = false;
       setState(() {
         waiting = false;
         if (widx?['total_ms'] != null) {
@@ -482,6 +551,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) setState(() {});
     } catch (e) {
       if (token != playToken || !mounted) return;
+      _switching = false;
       setState(() => waiting = false);
       now.setStatus('播放失败');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -552,12 +622,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  void _openChapters() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChaptersScreen(book: widget.book, activeSeq: seq),
+  Future<void> _openChapters() async {
+    // 从播放器进目录时不叠第二个播放器页：目录只把选中的章号带回来，
+    // 由当前页自己切章。否则旧页留在栈里，退出新页后会看到错章。
+    final picked = await Navigator.of(context).push<int>(
+      MaterialPageRoute<int>(
+        builder: (_) => ChaptersScreen(
+          book: widget.book,
+          activeSeq: seq,
+          pickOnly: true,
+        ),
       ),
     );
+    if (picked != null && mounted) {
+      await playChapter(picked);
+    }
   }
 
   void _openSettings() {

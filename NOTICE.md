@@ -43,6 +43,19 @@ Sec-MS-GEC 令牌实现（`src/edge_tts/drm.py`）的 Dart 移植，
 - 仓库不附带任何密钥，令牌由客户端按公开算法现算；
 - 因使用该通道产生的任何问题与本项目无关。
 
+## 外接 VoiceStudio（可选，不随包分发）
+
+`app/lib/voicestudio.dart` 只实现 [VoiceStudio](https://github.com/debpalash/VoiceStudio)
+公开文档中的 OpenAI 兼容 HTTP 客户端（`POST /v1/audio/speech`），
+**不包含、不复制 VoiceStudio 的任何代码或模型**。两边各自保持自己的许可：
+本仓库仍为 GPL-3.0，VoiceStudio 仍为 AGPL-3.0。
+
+- VoiceStudio 由用户自行安装和运行，其代码以 AGPL-3.0 发布；
+- 拾声只在用户显式打开「外接 VoiceStudio」并填写地址后发送章节文本；
+- 请求失败、超时或断网时回退本机 Kokoro，不改变默认的离线行为；
+- VoiceStudio 的模型权重和生成音频另有各自许可，使用前请在 VoiceStudio
+  的 Model Manager 里确认。
+
 ## 内容
 
 本仓库不含任何在版权期内的书籍正文。`lib/boot.dart` 的桌面预览、`test/` 下的测试夹具

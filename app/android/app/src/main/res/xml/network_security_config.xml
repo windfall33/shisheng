@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 只给本机回环开明文：播放走 http://127.0.0.1:<port> 的虚拟 WAV 流，
-     其余域名一律要求 TLS。 -->
+<!-- 本地虚拟 WAV（127.0.0.1）和用户显式填写的 VoiceStudio 局域网地址都可能走
+     http。除此之外 App 不发起明文请求，云端 Edge 仍走 HTTPS。
+     只把 VoiceStudio 暴露在可信局域网，不要直接开到公网。 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

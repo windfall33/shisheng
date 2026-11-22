@@ -8,7 +8,7 @@
 
 Android · Flutter · 端侧 TTS · 无需账号
 
-[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.1
+[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.2
 
 </div>
 
@@ -16,9 +16,9 @@ Android · Flutter · 端侧 TTS · 无需账号
 |---|---|---|
 | <img src="docs/screenshots/01-shelf.png" width="240"> | <img src="docs/screenshots/02-chapters.png" width="240"> | <img src="docs/screenshots/03-player.png" width="240"> |
 
-| 设置 | 浅色 |
-|---|---|
-| <img src="docs/screenshots/04-settings.png" width="240"> | <img src="docs/screenshots/05-shelf-light.png" width="240"> |
+| 设置 | 浅色 | 外接 VoiceStudio |
+|---|---|---|
+| <img src="docs/screenshots/04-settings.png" width="240"> | <img src="docs/screenshots/05-shelf-light.png" width="240"> | <img src="docs/screenshots/06-voice-studio.png" width="240"> |
 
 ## 它解决什么
 
@@ -35,8 +35,10 @@ TXT → 切章 → 分句分人 → 逐块合成（Kokoro int8）→ 边合成�
 - **分角色配音**：引号里的对白算对白，引号外算旁白；再按上下文（「某某道」「某某曰」）推断说话人。同一个人全篇恒定一个音色，男女老少分开——不是一个人从头念到尾。
 - **端侧合成**：Kokoro-82M-v1.1-zh int8，102 个中文音色，24kHz，跑在 `sherpa_onnx` 上。装完第一次启动解压模型（约 170MB，几十秒），之后不再需要电脑。
 - **边合成边播**：预渲前 3 章；播放到哪合成到哪，手机存储和算力不够时也不会卡死。
+- **书架书签**：当前章 + 后两章按书页顺序摆着，行尾直接写「正在听 / 已合成 / 合成中 / 待合成」，点哪章听哪章。
 - **播放页逐句高亮**：显示当前段前后各 2 段，当前句亮、其余暗，跟着声音滚动。
 - **音色来源开关**：`仅本机`（默认，全部在本机合成，不联网）/ `自动`（联网走云端音色，断网自动退回本机）。见下方[说明](#云端音色默认关闭)。
+- **可选外接 VoiceStudio**：设置 → 音色 → 外接 VoiceStudio，填电脑端地址和 API Key，即可用 VoiceStudio 的克隆/设计音色；断线自动回退本机。见下方[说明](#外接-voicestudio可选)。
 - 其它：快进快退、变速、睡眠定时、暂停后自动回退、断点续听、锁屏与通知栏控制、深/浅色主题。
 
 ## 构建
@@ -79,6 +81,7 @@ flutter build apk --release
 | `app/lib/perflog.dart` | 性能日志环形缓冲，导出 JSONL（设置页入口） |
 | `app/lib/engine.dart` | sherpa_onnx / Kokoro 的 isolate 池 |
 | `app/lib/tserver.dart` | `127.0.0.1` 虚拟 WAV 流，支持 Range 跳转（边合成边播的关键） |
+| `app/lib/voicestudio.dart` | 可选外接 VoiceStudio 的 OpenAI 兼容 HTTP 客户端（只发文本，不打包其代码） |
 | `app/lib/player.dart` | 播放页 |
 | `app/lib/screens.dart` | 书架 / 目录 / 设置 |
 | `app/lib/design.dart` | 设计 token：颜色、字号、间距、动效 |
@@ -94,6 +97,25 @@ flutter build apk --release
 2. 选了它，**章节正文会逐句发到微软那边**。默认是 `仅本机`，不会发生这件事。
 3. 相关代码在 `app/lib/cloud/edge_tts2/`，许可与原项目一致（MIT + 一处 LGPL-3.0 移植段），详见 [NOTICE.md](NOTICE.md)。
 
+## 外接 VoiceStudio（可选）
+
+[VoiceStudio](https://github.com/debpalash/VoiceStudio) 是一个独立的本地语音工作台，
+支持声音克隆、音色设计、有声书等。拾声不打包它的代码，只在设置里增加一路
+「外接 VoiceStudio」：
+
+1. 在电脑或另一台手机上运行 VoiceStudio，打开它的 Local / Phone Speech API；
+2. 拾声 → 设置 → 音色 → 外接 VoiceStudio，填地址（如 `http://192.168.1.20:3900`）
+   和 API Key（如果开了）；点「测试连接」；
+3. 「选旁白音色」「选对白音色」从 VoiceStudio 的音色列表里挑，或者直接填 profile id。
+
+拾声调用的是 VoiceStudio 公开的 OpenAI 兼容接口
+`POST /v1/audio/speech`（`response_format: pcm`），返回 24kHz/16-bit/mono PCM，
+正好接进现有渲染管线。请求失败、超时或断网时自动回退本机 Kokoro，
+不会让播放卡死。这个开关默认关闭；不打开时所有合成都只在本机。
+
+注意：VoiceStudio 以 AGPL-3.0 发布，拾声只通过 HTTP 调用它、不复制其代码。
+两边需要能互相访问（同一 Wi-Fi / Tailscale / 可信局域网）。
+
 ## 已知问题
 
 - **真机性能数据还没采**：v1.0.1 起内置性能日志（设置 → 存储 → 导出性能日志），
@@ -101,6 +123,10 @@ flutter build apk --release
   Redmi K90（骁龙 8 系）上短时试过。
 - 只解析 TXT，epub / mobi 不支持。
 - 音色是 TTS，不是真人配音；多音字、生僻字会读错，词典在 `assets/tts/lexicon-zh.txt`。
+- 外接 VoiceStudio 目前按「旁白 / 对白」两路选音色，还没有逐角色映射；
+  需要逐角色克隆时，先在 VoiceStudio 里建 profile，再把 id 填进对应字段。
+- VoiceStudio 的局域网地址通常是 `http://`；App 为这一路放开了明文，只建议在
+  可信局域网使用，不要把 VoiceStudio 暴露到公网。
 
 ## 许可
 
