@@ -10,7 +10,7 @@ class AppSettings {
   SharedPreferences? _p;
 
   final ValueNotifier<ThemeMode> themeMode = ValueNotifier<ThemeMode>(
-    ThemeMode.system,
+    ThemeMode.light,
   );
   final ValueNotifier<int> skipSeconds = ValueNotifier<int>(15);
   final ValueNotifier<double> defaultSpeed = ValueNotifier<double>(1.0);
@@ -47,11 +47,9 @@ class AppSettings {
     await _p?.setBool('onboard_import_v1', true);
   }
 
-  void load(SharedPreferences p, {bool preferDark = false}) {
+  void load(SharedPreferences p) {
     _p = p;
-    themeMode.value =
-        _themeMode(p.getString('themeMode')) ??
-        (preferDark ? ThemeMode.dark : ThemeMode.system);
+    themeMode.value = _themeMode(p.getString('themeMode')) ?? ThemeMode.light;
     skipSeconds.value = p.getInt('skipSeconds') ?? 15;
     defaultSpeed.value =
         p.getDouble('defaultSpeed') ?? p.getDouble('speed') ?? 1.0;

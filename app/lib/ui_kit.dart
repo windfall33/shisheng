@@ -231,25 +231,58 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
+    final trimmed = title.trim();
+    final initial = trimmed.isEmpty
+        ? '声'
+        : String.fromCharCode(trimmed.runes.first);
+    final tones = <Color>[t.coral, t.lemon, t.lilac, t.mint];
+    final tone =
+        tones[trimmed.runes.fold<int>(0, (sum, rune) => sum + rune) % tones.length];
     return Semantics(
       button: true,
-      label: '打开播放器，$title，$chapter',
+      label: '打开播放页：$title，$chapter',
       child: Material(
         color: t.surface,
         child: InkWell(
           onTap: onTap,
           child: Container(
-            height: 64,
             decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: t.line, width: .5)),
+              border: Border(top: BorderSide(color: t.outline, width: 2)),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Expanded(
+                SizedBox(
+                  height: 74,
                   child: Padding(
-                    padding: const EdgeInsets.only(left: AppSpace.xxl),
+                    padding: const EdgeInsets.fromLTRB(12, 9, 12, 7),
                     child: Row(
                       children: <Widget>[
+                        Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: tone,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: t.outline, width: 2),
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: t.outline,
+                                offset: const Offset(2, 2),
+                                blurRadius: 0,
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            initial,
+                            style: AppType.title.copyWith(
+                              color: t.onAccent,
+                              fontSize: 20,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 11),
                         Expanded(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -259,8 +292,6 @@ class MiniPlayer extends StatelessWidget {
                                 title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                // 和书库、目录里的书名同一档：同一类东西（一行书名）
-                                // 在任何地方都该一样大。
                                 style: AppType.book.copyWith(color: t.text),
                               ),
                               const SizedBox(height: 2),
@@ -272,24 +303,17 @@ class MiniPlayer extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: AppType.meta.copyWith(
-                                        color: t.faint,
+                                        color: t.muted,
                                       ),
                                     ),
                                   ),
-                                  if (timeLabel != null) ...<Widget>[
+                                  if (timeLabel != null)
                                     Text(
-                                      ' · ',
-                                      style: AppType.meta.copyWith(
-                                        color: t.faint,
-                                      ),
-                                    ),
-                                    Text(
-                                      timeLabel!,
+                                      '  $timeLabel',
                                       style: AppType.time.copyWith(
                                         color: t.faint,
                                       ),
                                     ),
-                                  ],
                                 ],
                               ),
                             ],
@@ -297,33 +321,44 @@ class MiniPlayer extends StatelessWidget {
                         ),
                         if (sleeping)
                           Padding(
-                            padding: const EdgeInsets.only(right: AppSpace.sm),
+                            padding: const EdgeInsets.only(right: 4),
                             child: Icon(
                               Icons.nightlight_round,
-                              size: 15,
+                              size: 16,
                               color: t.faint,
                             ),
                           ),
-                        // 图标的右缘落在页面 24 栏上：横条左右两端收在同一条栅格里，
-                        // 才不会看起来是自己往外飘的。
-                        Padding(
-                          padding: EdgeInsets.only(
-                            right: AppSpace.xxl - (_tap - _icon) / 2,
-                          ),
-                          child: SizedBox(
-                            width: _tap,
-                            height: _tap,
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              onPressed: onToggle,
-                              tooltip: playing ? '暂停' : '继续播放',
-                              icon: buffering && !playing
-                                  ? SizedBox(
-                                      width: 18,
-                                      height: 18,
+                        const SizedBox(width: 6),
+                        Semantics(
+                          button: true,
+                          label: playing ? '暂停' : '继续播放',
+                          child: InkWell(
+                            onTap: onToggle,
+                            customBorder: const CircleBorder(),
+                            child: Container(
+                              width: _tap,
+                              height: _tap,
+                              decoration: BoxDecoration(
+                                color: t.coral,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: t.outline,
+                                  width: 2,
+                                ),
+                                boxShadow: <BoxShadow>[
+                                  BoxShadow(
+                                    color: t.outline,
+                                    offset: const Offset(2, 2),
+                                    blurRadius: 0,
+                                  ),
+                                ],
+                              ),
+                              child: buffering && !playing
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(13),
                                       child: CircularProgressIndicator(
-                                        strokeWidth: 1.6,
-                                        color: t.text,
+                                        strokeWidth: 2,
+                                        color: t.onAccent,
                                       ),
                                     )
                                   : Icon(
@@ -331,7 +366,7 @@ class MiniPlayer extends StatelessWidget {
                                           ? Icons.pause_rounded
                                           : Icons.play_arrow_rounded,
                                       size: _icon,
-                                      color: t.text,
+                                      color: t.onAccent,
                                     ),
                             ),
                           ),
@@ -340,8 +375,12 @@ class MiniPlayer extends StatelessWidget {
                     ),
                   ),
                 ),
-                // 进度只剩这一条：它已经说明播到哪，左边不需要再来一根橙条。
-                ProgressLine(value: progress, height: 2),
+                ProgressLine(
+                  value: progress,
+                  height: 5,
+                  color: t.coral,
+                  background: t.surfaceAlt,
+                ),
               ],
             ),
           ),

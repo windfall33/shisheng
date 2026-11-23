@@ -27,9 +27,15 @@ flutter build apk --release
 | `lib/perflog.dart` | 性能日志（环形缓冲，JSONL 导出） |
 | `lib/engine.dart` | sherpa_onnx / Kokoro 的 isolate 池 |
 | `lib/tserver.dart` | 本地 127.0.0.1 虚拟 WAV 流，支持 Range 跳转 |
-| `lib/player.dart` | 播放页（当前句高亮、逐句跟读） |
-| `lib/screens.dart` | 书架 / 目录 / 设置 |
-| `lib/design.dart` | 设计 token（颜色、字号、间距、动效） |
-| `DESIGN.md` | 设计说明（为什么这么排、每屏主角、五态、无障碍） |
+| `lib/club_screens.dart` | 阵容 / 剧本库 / 分镜 / 试镜 / 设置 |
+| `lib/club_ui.dart` | 角色卡、对白气泡、粗描边卡片等 B 视觉组件 |
+| `lib/player.dart` | 对白播放页（谁在说话、当前句、下一句） |
+| `lib/screens.dart` | 旧版辅助页面与共享设置控件 |
+| `lib/design.dart` | 设计 token（颜色、字体、间距、动效） |
+| `DESIGN.md` | CAST CLUB 设计说明（为什么这么排、每屏主角、数据真实性） |
 | `PRODUCT.md` | 产品约束与边界 |
-| `test/design_preview_test.dart` | 15 张 golden 截图回归 |
+| `test/club_preview_test.dart` | 6 张 CAST CLUB golden 截图 |
+| `test/startup_preview_test.dart` | 启动页 golden |
+| `test/club_screens_responsive_test.dart` | 阵容/剧本库/分镜 2 倍字号冒烟 |
+| `test/club_audition_responsive_test.dart` | 试镜 2 倍字号冒烟 |
+| `test/club_player_responsive_test.dart` | 对白页 2 倍字号与横屏冒烟 |

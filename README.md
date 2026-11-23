@@ -4,25 +4,30 @@
 
 [![CI](https://github.com/windfall33/shisheng/actions/workflows/ci.yml/badge.svg)](https://github.com/windfall33/shisheng/actions/workflows/ci.yml)
 
-**把一本 TXT 丢进去，它自己切章、分角色，在手机里合成，断网也能听。**
+**先认识角色，再开始听。**
 
-Android · Flutter · 端侧 TTS · 无需账号
+把一本 TXT 丢进去，拾声拆出角色、场景和对白，在手机里合成，断网也能听。
 
-[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.0.2
+Android · Flutter · 端侧 TTS · CAST CLUB · 无需账号
+
+[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.1.0
 
 </div>
 
-| 书架 | 目录 | 播放 |
+| 启动 | 阵容 | 剧本库 |
 |---|---|---|
-| <img src="docs/screenshots/01-shelf.png" width="240"> | <img src="docs/screenshots/02-chapters.png" width="240"> | <img src="docs/screenshots/03-player.png" width="240"> |
+| <img src="docs/screenshots/00-start.png" width="240"> | <img src="docs/screenshots/01-cast.png" width="240"> | <img src="docs/screenshots/02-scripts.png" width="240"> |
 
-| 设置 | 浅色 | 外接 VoiceStudio |
+| 分镜 | 对白 | 试镜 |
 |---|---|---|
-| <img src="docs/screenshots/04-settings.png" width="240"> | <img src="docs/screenshots/05-shelf-light.png" width="240"> | <img src="docs/screenshots/06-voice-studio.png" width="240"> |
+| <img src="docs/screenshots/03-script.png" width="240"> | <img src="docs/screenshots/04-dialogue.png" width="240"> | <img src="docs/screenshots/05-audition.png" width="240"> |
 
 ## 它解决什么
 
 夜里躺着听书。不想联网、不想登录、不想开会员，也不想等一整个音频文件下载完。
+
+但听书之前，先得知道这一场有谁。拾声把「角色」放到书架前面：先看今晚的阵容，
+再翻剧本和分镜，最后进入对白页听谁在说话。
 
 所以整条链路都在手机上：
 
@@ -35,8 +40,10 @@ TXT → 切章 → 分句分人 → 逐块合成（Kokoro int8）→ 边合成�
 - **分角色配音**：引号里的对白算对白，引号外算旁白；再按上下文（「某某道」「某某曰」）推断说话人。同一个人全篇恒定一个音色，男女老少分开——不是一个人从头念到尾。
 - **端侧合成**：Kokoro-82M-v1.1-zh int8，102 个中文音色，24kHz，跑在 `sherpa_onnx` 上。装完第一次启动解压模型（约 170MB，几十秒），之后不再需要电脑。
 - **边合成边播**：预渲前 3 章；播放到哪合成到哪，手机存储和算力不够时也不会卡死。
-- **书架书签**：当前章 + 后两章按书页顺序摆着，行尾直接写「正在听 / 已合成 / 合成中 / 待合成」，点哪章听哪章。
-- **播放页逐句高亮**：显示当前段前后各 2 段，当前句亮、其余暗，跟着声音滚动。
+- **阵容首页**：当前书、当前幕、这一场有谁，一眼看完；角色出场数从正文的说话人统计，不按封面编造。
+- **剧本库 + 分镜**：每本 TXT 都有角色表、场次和合成进度，点一场直接继续听。
+- **对白页**：当前说话的人站出来，旁白退到浅紫卡片，下一句在黄色气泡里等；逐句跟随原来的播放状态机。
+- **试镜间**：每个角色一张声卡，显示对白与声线编号；本机 / 自动 / 外接 VoiceStudio 在这一页收口。逐角色即时试听尚未实现。
 - **音色来源开关**：`仅本机`（默认，全部在本机合成，不联网）/ `自动`（联网走云端音色，断网自动退回本机）。见下方[说明](#云端音色默认关闭)。
 - **可选外接 VoiceStudio**：设置 → 音色 → 外接 VoiceStudio，填电脑端地址和 API Key，即可用 VoiceStudio 的克隆/设计音色；断线自动回退本机。见下方[说明](#外接-voicestudio可选)。
 - 其它：快进快退、变速、睡眠定时、暂停后自动回退、断点续听、锁屏与通知栏控制、深/浅色主题。
@@ -82,10 +89,12 @@ flutter build apk --release
 | `app/lib/engine.dart` | sherpa_onnx / Kokoro 的 isolate 池 |
 | `app/lib/tserver.dart` | `127.0.0.1` 虚拟 WAV 流，支持 Range 跳转（边合成边播的关键） |
 | `app/lib/voicestudio.dart` | 可选外接 VoiceStudio 的 OpenAI 兼容 HTTP 客户端（只发文本，不打包其代码） |
-| `app/lib/player.dart` | 播放页 |
-| `app/lib/screens.dart` | 书架 / 目录 / 设置 |
-| `app/lib/design.dart` | 设计 token：颜色、字号、间距、动效 |
-| `app/DESIGN.md` | 设计说明：每屏主角、五态、对比度、为什么这么排 |
+| `app/lib/club_screens.dart` | 阵容 / 剧本库 / 分镜 / 试镜 / 设置 |
+| `app/lib/club_ui.dart` | 角色卡、对白气泡、粗描边卡片等 CAST CLUB 组件 |
+| `app/lib/player.dart` | 对白播放页 |
+| `app/lib/screens.dart` | 共享设置控件与旧版辅助页面 |
+| `app/lib/design.dart` | 设计 token：颜色、字体、间距、动效 |
+| `app/DESIGN.md` | CAST CLUB 设计说明：每屏主角、数据真实性、响应式 |
 
 ## 云端音色（默认关闭）
 
@@ -132,6 +141,6 @@ flutter build apk --release
 
 GPL-3.0，见 [LICENSE](LICENSE)。第三方组件（模型、字体、播放器、Edge 模块）的许可见 [NOTICE.md](NOTICE.md)。
 
-模型 [Kokoro-82M-v1.1-zh](https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1) 为 Apache-2.0，字体子集来自思源宋体 / 思源黑体（SIL OFL 1.1）。
+模型 [Kokoro-82M-v1.1-zh](https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1) 为 Apache-2.0。标题字体为 ZCOOL KuaiLe，正文字体为思源黑体子集，均按 SIL OFL 1.1 使用。
 
 仓库里不含任何在版权期内的书籍正文：演示数据和测试夹具用的都是公有领域的《聊斋志异》。

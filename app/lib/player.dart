@@ -7,12 +7,13 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'boot.dart';
+import 'club_screens.dart' show AuditionScreen, ScriptScreen;
+import 'club_ui.dart';
 import 'design.dart';
 import 'globals.dart' show audioPlayer, prefs;
 import 'models.dart';
 import 'playback.dart';
 import 'render.dart';
-import 'screens.dart' show ChaptersScreen, SettingsScreen;
 import 'settings.dart';
 import 'store.dart';
 import 'ui_kit.dart';
@@ -627,7 +628,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 由当前页自己切章。否则旧页留在栈里，退出新页后会看到错章。
     final picked = await Navigator.of(context).push<int>(
       MaterialPageRoute<int>(
-        builder: (_) => ChaptersScreen(
+        builder: (_) => ScriptScreen(
           book: widget.book,
           activeSeq: seq,
           pickOnly: true,
@@ -641,7 +642,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _openSettings() {
     Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+        .push(MaterialPageRoute<void>(builder: (_) => const AuditionScreen()));
   }
 
   Future<void> _showSleepSheet() async {
@@ -926,64 +927,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final remain = duration - pos;
         return Column(
           children: <Widget>[
-              // 条尾给一个终点刻度：否则「还剩 15:26」在画面上找不到对应的长度。
-              Stack(
-                children: <Widget>[
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      padding: EdgeInsets.zero,
-                      trackHeight: 3,
-                      activeTrackColor: t.gold,
-                      inactiveTrackColor: t.track,
-                      thumbColor: t.gold,
-                      overlayColor: t.gold.withValues(alpha: .12),
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 5,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                        overlayRadius: 14,
-                      ),
-                    ),
-                    child: Slider(
-                      value: value,
-                      onChanged: waiting
-                          ? null
-                          : (v) => audioPlayer.seek(duration * v),
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: Container(width: 1, height: 9, color: t.track),
-                    ),
-                  ),
-                ],
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                padding: EdgeInsets.zero,
+                trackHeight: 8,
+                activeTrackColor: t.coral,
+                inactiveTrackColor: t.surface,
+                thumbColor: t.lemon,
+                overlayColor: t.lemon.withValues(alpha: .22),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
               ),
+              child: Slider(
+                value: value,
+                onChanged: waiting
+                    ? null
+                    : (v) => audioPlayer.seek(duration * v),
+              ),
+            ),
             Row(
               children: <Widget>[
-                Text(fmt(pos), style: AppType.time.copyWith(color: t.muted)),
+                Text(
+                  fmt(pos),
+                  style: AppType.time.copyWith(
+                    color: t.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpace.sm,
                     ),
                     child: Text(
-                      renderStat,
+                      renderStat.isEmpty ? 'ON AIR / 正在播出' : renderStat,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                       style: AppType.caption.copyWith(
-                        color: t.faint,
-                        letterSpacing: .2,
+                        color: t.muted,
+                        letterSpacing: .8,
                       ),
                     ),
                   ),
                 ),
                 Text(
                   '-${fmt(remain)}',
-                  style: AppType.time.copyWith(color: t.muted),
+                  style: AppType.time.copyWith(color: t.text),
                 ),
               ],
             ),
@@ -1022,10 +1012,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ].join(' · ');
 
     return Scaffold(
-      backgroundColor: t.bg,
-      body: SafeArea(
-        bottom: false,
-        child: Center(
+      backgroundColor: t.isDark ? t.bg2 : t.mint,
+      body: ClubBackdrop(
+        color: t.isDark ? t.bg2 : t.mint,
+        player: true,
+        child: SafeArea(
+          bottom: false,
+          child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
             child: Column(
@@ -1052,7 +1045,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpace.xxl,
-                    AppSpace.sm,
+                    4,
                     AppSpace.xxl,
                     0,
                   ),
@@ -1060,10 +1053,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        title.isEmpty ? '第 ${seq + 1} 章' : title,
-                        style: AppType.display.copyWith(color: t.text),
+                        'DIALOGUE / 对白',
+                        style: AppType.label.copyWith(
+                          color: t.muted,
+                          letterSpacing: 2.4,
+                        ),
                       ),
-                      const SizedBox(height: AppSpace.sm),
+                      const SizedBox(height: 2),
+                      Text(
+                        '谁在说话',
+                        style: AppType.hero.copyWith(color: t.text),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: <Widget>[
+                          if (who.isNotEmpty)
+                            ClubTag(who, color: t.coral),
+                          ClubTag(
+                            title.isEmpty ? '第 ${seq + 1} 幕' : title,
+                            color: t.lemon,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 9),
                       Text(
                         by,
                         maxLines: 1,
@@ -1092,7 +1106,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            _ReadingPage(
+                            _ClubReading(
                               timeline: timeline,
                               curIndex: curIndex,
                               fallback: curText.isEmpty ? '正在准备音频…' : curText,
@@ -1121,7 +1135,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       onTap: () =>
                           _skip(-AppSettings.instance.skipSeconds.value),
                     ),
-                    const SizedBox(width: 40),
+                    const SizedBox(width: 26),
                     _MainButton(
                       playing: now.playing,
                       onTap: () {
@@ -1132,7 +1146,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         }
                       },
                     ),
-                    const SizedBox(width: 40),
+                    const SizedBox(width: 26),
                     _SkipButton(
                       seconds: AppSettings.instance.skipSeconds.value,
                       back: false,
@@ -1154,6 +1168,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),
@@ -1178,32 +1193,44 @@ class _TopIcon extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 22,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(icon, size: 18, color: t.text),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: t.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: t.outline, width: 2),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: t.outline,
+                  offset: const Offset(2, 2),
+                  blurRadius: 0,
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 19, color: t.text),
+          ),
         ),
       ),
     );
   }
 }
 
-/// 正文页：按段落排版，当前句最亮，其余句子暗一档但仍然可读。
-///
-/// 索引里没有段落字段，只能从相邻句的时间空隙推断：渲染时段间停顿
-/// [RenderCfg.pausePara]（350ms）明显大于句间与换声停顿，因此 gap ≥ 300ms
-/// 视为换段；对白以引号开头且上一句已收尾时也单独成段。
-class _ReadingPage extends StatefulWidget {
+/// 对白页：当前说话的人站出来，下一句缩在黄色小气泡里等。
+/// 只读取播放状态机已经算好的 timeline / curIndex，不改播放逻辑。
+class _ClubReading extends StatelessWidget {
   final List<Map<String, dynamic>> timeline;
   final int curIndex;
   final String fallback;
   final String fallbackNext;
   final VoidCallback? onTapCurrent;
 
-  const _ReadingPage({
+  const _ClubReading({
     required this.timeline,
     required this.curIndex,
     required this.fallback,
@@ -1211,167 +1238,172 @@ class _ReadingPage extends StatefulWidget {
     this.onTapCurrent,
   });
 
-  @override
-  State<_ReadingPage> createState() => _ReadingPageState();
-}
-
-class _ReadingPageState extends State<_ReadingPage> {
-  final Map<int, GlobalKey> _keys = <int, GlobalKey>{};
-
-  static const String _indent = '　　';
-
-  @override
-  void didUpdateWidget(_ReadingPage old) {
-    super.didUpdateWidget(old);
-    if (old.curIndex != widget.curIndex) _revealCurrent();
+  static String _speakerOf(Map<String, dynamic>? seg) {
+    if (seg == null) return '';
+    if (seg['type'] == 'narration') return '旁白';
+    final name = (seg['speaker'] ?? '').toString().trim();
+    return name.isEmpty ? '旁白' : name;
   }
-
-  @override
-  void initState() {
-    super.initState();
-    _revealCurrent();
-  }
-
-  void _revealCurrent() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final ctx = _keys[widget.curIndex]?.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: .34,
-        duration: AppMotion.base,
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
-  bool _breakBefore(int i) {
-    final tl = widget.timeline;
-    final prev = tl[i - 1];
-    final cur = tl[i];
-    final gap =
-        ((cur['start_ms'] as num?)?.toInt() ?? 0) -
-        ((prev['end_ms'] as num?)?.toInt() ?? 0);
-    if (gap >= 300) return true;
-    final pt = (prev['text'] ?? '').toString();
-    final ct = (cur['text'] ?? '').toString();
-    const closed = '。！？…」”';
-    if (ct.startsWith('“') || ct.startsWith('「')) {
-      return pt.isNotEmpty && closed.contains(pt[pt.length - 1]);
-    }
-    return false;
-  }
-
-  /// 当前段前后各留两段做上下文，总句数封顶 30，避免长段落撑爆版面。
-  List<List<int>> _window() {
-    final tl = widget.timeline;
-    final paras = <List<int>>[];
-    for (var i = 0; i < tl.length; i++) {
-      if (i == 0 || _breakBefore(i)) {
-        paras.add(<int>[i]);
-      } else {
-        paras.last.add(i);
-      }
-    }
-    var here = 0;
-    for (var p = 0; p < paras.length; p++) {
-      if (paras[p].contains(widget.curIndex)) {
-        here = p;
-        break;
-      }
-    }
-    final from = (here - 2).clamp(0, paras.length - 1);
-    final to = (here + 2).clamp(0, paras.length - 1);
-    final out = <List<int>>[];
-    var count = 0;
-    for (var p = from; p <= to; p++) {
-      final seg = paras[p];
-      if (count > 0 && count + seg.length > 30) break;
-      out.add(seg);
-      count += seg.length;
-    }
-    return out;
-  }
-
-  TextStyle _base(AppTokens t, Color color) =>
-      AppType.reading.copyWith(color: color, letterSpacing: .1);
 
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    final tl = widget.timeline;
+    Map<String, dynamic>? cur;
+    Map<String, dynamic>? nxt;
+    if (timeline.isEmpty) {
+      cur = <String, dynamic>{'text': fallback, 'type': 'narration'};
+      if (fallbackNext.isNotEmpty) {
+        nxt = <String, dynamic>{
+          'text': fallbackNext,
+          'type': 'dialogue',
+          'speaker': '',
+        };
+      }
+    } else {
+      final i = curIndex < 0
+          ? 0
+          : (curIndex >= timeline.length ? timeline.length - 1 : curIndex);
+      cur = timeline[i];
+      if (i + 1 < timeline.length) nxt = timeline[i + 1];
+    }
 
-    if (tl.isEmpty) {
-      final cur = widget.fallback;
-      final nxt = widget.fallbackNext;
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTapCurrent,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              '$_indent$cur',
-              style: _base(t, t.text).copyWith(
-                fontVariations: const <FontVariation>[
-                  FontVariation('wght', 480),
+    final isNarration = cur['type'] == 'narration';
+    final curText = (cur['text'] ?? '').toString();
+    final nextText = (nxt?['text'] ?? '').toString();
+    final speaker = _speakerOf(cur);
+    final nextSpeaker = _speakerOf(nxt);
+
+    final current = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTapCurrent,
+      child: isNarration
+          ? ClubCard(
+              color: t.lilac,
+              shadow: 5,
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: t.lemon,
+                          border: Border.all(color: t.outline, width: 1.4),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
+                        'NARRATOR / 旁白',
+                        style: AppType.label.copyWith(
+                          color: t.onAccent,
+                          letterSpacing: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    curText,
+                    style: AppType.book.copyWith(
+                      color: t.onAccent,
+                      fontSize: 18,
+                      height: 1.62,
+                    ),
+                  ),
                 ],
-                fontWeight: FontWeight.w500,
+              ),
+            )
+          : ClubSpeechBubble(
+              color: t.coral,
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 30),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'SPEAKING / $speaker',
+                    style: AppType.label.copyWith(
+                      color: t.onAccent,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    curText,
+                    style: AppType.line.copyWith(
+                      color: t.onAccent,
+                      fontSize: 25,
+                      height: 1.38,
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (nxt.isNotEmpty) ...<Widget>[
-              const SizedBox(height: AppSpace.md),
-              Text('$_indent$nxt', style: _base(t, t.muted)),
-            ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        // 2 倍字号下两段标签会超过一行：让右侧状态整体换行，
+        // 而不是把「正在播出」或状态胶囊挤出屏幕。
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: <Widget>[
+            Text(
+              'ON AIR / 正在播出',
+              style: AppType.label.copyWith(color: t.muted),
+            ),
+            ClubTag(
+              isNarration ? '旁白退到背景' : '角色站到前面',
+              color: isNarration ? t.surface : t.mint,
+            ),
           ],
         ),
-      );
-    }
-
-    final paras = _window();
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onTapCurrent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          for (var p = 0; p < paras.length; p++) ...<Widget>[
-            if (p > 0) const SizedBox(height: AppSpace.md),
-            _paragraph(t, paras[p]),
-          ],
+        const SizedBox(height: 14),
+        current,
+        if (nextText.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: ClubSpeechBubble(
+                color: t.lemon,
+                tailLeft: false,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'NEXT / ${nextSpeaker.isEmpty ? '下一句' : nextSpeaker}',
+                      style: AppType.label.copyWith(
+                        color: t.onAccent,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      nextText,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppType.bubble.copyWith(
+                        color: t.onAccent,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
-      ),
-    );
-  }
-
-  Widget _paragraph(AppTokens t, List<int> idxs) {
-    final inPara = idxs.contains(widget.curIndex);
-    final spans = <InlineSpan>[];
-    for (var k = 0; k < idxs.length; k++) {
-      final i = idxs[k];
-      final text = (widget.timeline[i]['text'] ?? '').toString();
-      if (text.isEmpty) continue;
-      final isCur = i == widget.curIndex;
-      final style = isCur
-          ? _base(t, t.text).copyWith(
-              fontVariations: const <FontVariation>[FontVariation('wght', 480)],
-              fontWeight: FontWeight.w500,
-            )
-          : _base(t, t.muted);
-      if (k == 0) {
-        spans.add(TextSpan(text: _indent, style: style));
-      }
-      spans.add(TextSpan(text: text, style: style));
-    }
-    if (spans.isEmpty) return const SizedBox.shrink();
-    return Container(
-      key: inPara ? (_keys[widget.curIndex] ??= GlobalKey()) : null,
-      child: Text.rich(
-        TextSpan(children: spans),
-        // 中文禁止两端对齐：会撑出难看的字间空隙。
-        textAlign: TextAlign.start,
-      ),
+      ],
     );
   }
 }
@@ -1385,25 +1417,31 @@ class _MainButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    // 56 的描边圆，不是 76 的实心盘：76 实心在 #0A0A0A 上有 4300 个白像素，
-    // 是整页标题的五倍，夜里看就是一块手电筒。描边 + 实心字形一样按得准。
     return Semantics(
       button: true,
       label: playing ? '暂停' : '播放',
       child: InkResponse(
         onTap: onTap,
-        radius: 34,
+        radius: 42,
         child: Container(
-          width: 56,
-          height: 56,
+          width: 68,
+          height: 68,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: t.text, width: 1.5),
+            color: t.coral,
+            border: Border.all(color: t.outline, width: 2.5),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: t.outline,
+                offset: const Offset(4, 4),
+                blurRadius: 0,
+              ),
+            ],
           ),
           child: Icon(
             playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            size: 22,
-            color: t.text,
+            size: 32,
+            color: t.onAccent,
           ),
         ),
       ),
@@ -1430,18 +1468,28 @@ class _SkipButton extends StatelessWidget {
       label: back ? '后退 $seconds 秒' : '前进 $seconds 秒',
       child: InkResponse(
         onTap: onTap,
-        radius: 28,
-        child: SizedBox(
-          width: 56,
-          height: 56,
+        radius: 32,
+        child: Container(
+          width: 54,
+          height: 54,
+          decoration: BoxDecoration(
+            color: t.surface,
+            shape: BoxShape.circle,
+            border: Border.all(color: t.outline, width: 2),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: t.outline,
+                offset: const Offset(2, 2),
+                blurRadius: 0,
+              ),
+            ],
+          ),
           child: Stack(
             alignment: Alignment.center,
             children: <Widget>[
-              // 用实线圆弧 + 镜像，不用带虚线的旋转图标：虚线在暗屏上碎成
-              // 一串点，远看像加载中。数字落在圆弧中间的空档里。
               Transform.scale(
                 scaleX: back ? 1 : -1,
-                child: Icon(Icons.replay_rounded, size: 42, color: t.text),
+                child: Icon(Icons.replay_rounded, size: 30, color: t.text),
               ),
               Transform.translate(
                 offset: const Offset(0, 2),
@@ -1450,9 +1498,7 @@ class _SkipButton extends StatelessWidget {
                   style: AppType.caption.copyWith(
                     color: t.text,
                     letterSpacing: 0,
-                    fontVariations: const <FontVariation>[
-                      FontVariation('wght', 500),
-                    ],
+                    fontSize: 9.5,
                   ),
                 ),
               ),
@@ -1487,36 +1533,32 @@ class _OptsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = AppTokens.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: t.line, width: .5)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.md,
-            vertical: AppSpace.xs,
-          ),
-          child: Row(
-            children: <Widget>[
-              _opt(
-                context,
-                speedLabel,
-                speedActive,
-                onSpeed,
-              ),
-              _opt(
-                context,
-                sleepLabel,
-                sleepActive,
-                onSleep,
-              ),
-              _opt(context, '设置', false, onSettings),
-              _opt(context, '目录', false, onChapters),
-            ],
-          ),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          0,
+          AppSpace.lg,
+          AppSpace.sm,
+        ),
+        child: Row(
+          children: <Widget>[
+            _opt(
+              context,
+              speedLabel,
+              speedActive,
+              onSpeed,
+            ),
+            _opt(
+              context,
+              sleepLabel,
+              sleepActive,
+              onSleep,
+            ),
+            _opt(context, '设置', false, onSettings),
+            _opt(context, '目录', false, onChapters),
+          ],
         ),
       ),
     );
@@ -1530,27 +1572,44 @@ class _OptsRow extends StatelessWidget {
   ) {
     final t = AppTokens.of(context);
     return Expanded(
-      child: Semantics(
-        button: true,
-        label: label,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 24,
-          child: SizedBox(
-            height: 48,
-            child: Center(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                // 这一行是躺下以后按得最多的四个键（倍速、定时、设置、目录），
-                // 原来用 11 的小字，比正文小两倍多，摸黑根本认不出来。
-                style: AppType.body.copyWith(
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                  fontVariations: <FontVariation>[
-                    FontVariation('wght', active ? 600 : 480),
-                  ],
-                  color: active ? t.text : t.muted,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Semantics(
+          button: true,
+          label: label,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: active ? t.lemon : t.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: active ? t.outline : t.line,
+                    width: active ? 1.8 : 1.2,
+                  ),
+                  boxShadow: active
+                      ? <BoxShadow>[
+                          BoxShadow(
+                            color: t.outline,
+                            offset: const Offset(2, 2),
+                            blurRadius: 0,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppType.caption.copyWith(
+                    color: active ? t.onAccent : t.text,
+                    letterSpacing: .5,
+                  ),
                 ),
               ),
             ),

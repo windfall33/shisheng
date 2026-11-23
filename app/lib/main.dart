@@ -1,7 +1,6 @@
 // 拾声 v4 · 本地小说听书（Android，断网可听）。
 // 架构：导入 TXT → 手机切章/分声 → sherpa-onnx Kokoro 端侧合成 → 本地虚拟 WAV 流播放。
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -9,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_shell.dart';
 import 'boot.dart';
+import 'club_ui.dart';
 import 'design.dart';
 import 'globals.dart' as g;
 import 'settings.dart';
@@ -27,7 +27,7 @@ Future<void> main() async {
     );
   } catch (_) {} // 桌面预览模式无此插件
   g.prefs = await SharedPreferences.getInstance();
-  AppSettings.instance.load(g.prefs, preferDark: Platform.isWindows);
+  AppSettings.instance.load(g.prefs);
   // 引擎初始化放后台：模型解压 + 引擎加载不阻塞首帧
   unawaited(Boot.init());
   runApp(const ShishengApp());
@@ -46,12 +46,12 @@ class ShishengApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(Brightness.light),
         darkTheme: buildAppTheme(Brightness.dark),
-        // 桌面预览默认暗色（书卷主视觉）；手机上跟随用户设置。
+        // 首次启动进入浅色舞台；用户可在设置里切换跟随系统或暗场。
         themeMode: _previewTheme == 'light'
             ? ThemeMode.light
             : _previewTheme == 'dark'
             ? ThemeMode.dark
-            : (Boot.preview ? ThemeMode.dark : mode),
+            : mode,
         home: _previewPhone ? const _PhoneFrame(child: Root()) : const Root(),
       ),
     );
@@ -102,121 +102,180 @@ class _RootState extends State<Root> {
     if (Boot.error != null) {
       return Scaffold(
         backgroundColor: t.bg,
-        body: SafeArea(
+        body: ClubBackdrop(
+          child: SafeArea(
             child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpace.section),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      '拾声',
-                      style: AppType.brand.copyWith(color: t.text),
-                    ),
-                    const SizedBox(height: AppSpace.xxl),
-                    Text(
-                      '启动遇到问题',
-                      style: AppType.title.copyWith(color: t.text),
-                    ),
-                    const SizedBox(height: AppSpace.md),
-                    Text(
-                      '引擎初始化失败：${Boot.error}\n清后台后重试通常可解；仍不行请告诉我机型。',
-                      textAlign: TextAlign.center,
-                      style: AppType.body.copyWith(color: t.muted, height: 1.7),
-                    ),
-                    const SizedBox(height: AppSpace.xxl),
-                    InkWell(
-                      onTap: () {
-                        setState(() {
-                          Boot.error = null;
-                          Boot.status = '准备引擎…';
-                        });
-                        unawaited(Boot.init());
-                      },
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        height: 44,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpace.xxl,
-                        ),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpace.xxl),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const ClubAvatar(
+                        label: '拾',
+                        tone: CastTone.coral,
+                        size: 58,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '拾声',
+                        style: AppType.brand.copyWith(
                           color: t.text,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '重试',
-                          style: AppType.button.copyWith(color: t.bg),
+                          letterSpacing: 2,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 20),
+                      ClubCard(
+                        color: t.coral,
+                        shadow: 6,
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            ClubTag(
+                              'OFF AIR / 舞台故障',
+                              color: t.lemon,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              '舞台没搭起来',
+                              style: AppType.title.copyWith(color: t.onAccent),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '引擎初始化失败：${Boot.error}\n'
+                              '清后台后重试通常可解；仍不行请告诉我机型。',
+                              style: AppType.body.copyWith(
+                                color: t.onAccent,
+                                height: 1.65,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: ClubButton(
+                                label: '再试一次',
+                                icon: Icons.refresh_rounded,
+                                color: t.lemon,
+                                onTap: () {
+                                  setState(() {
+                                    Boot.error = null;
+                                    Boot.status = '准备引擎…';
+                                  });
+                                  unawaited(Boot.init());
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+        ),
       );
     }
     if (!Boot.ready) {
       return Scaffold(
         backgroundColor: t.bg,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpace.section),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    '拾声',
-                    textAlign: TextAlign.center,
-                    style: AppType.brand.copyWith(color: t.text),
-                  ),
-                  const SizedBox(height: AppSpace.sm),
-                  Text(
-                    '把一本书，听成一间书房',
-                    style: AppType.body.copyWith(
-                      color: t.muted,
-                      letterSpacing: 1.6,
-                    ),
-                  ),
-                  const SizedBox(height: 56),
-                  SizedBox(
-                    width: 200,
-                    // 和书库 hero 同一条进度语言：填充实色、槽用 track（不是 line）。
-                    child: LinearProgressIndicator(
-                      color: t.text,
-                      backgroundColor: t.track,
-                      minHeight: 2,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.lg),
-                  Text(
-                    Boot.status,
-                    textAlign: TextAlign.center,
-                    style: AppType.caption.copyWith(color: t.faint),
-                  ),
-                  const SizedBox(height: 40),
-                  Row(
+        body: ClubBackdrop(
+          child: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 32, 28, 32),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Text(
-                        '端侧合成',
-                        style: AppType.caption.copyWith(color: t.faint),
+                      const ClubAvatar(
+                        label: '拾',
+                        tone: CastTone.coral,
+                        size: 66,
                       ),
-                      _StartDivider(t: t),
+                      const SizedBox(height: 12),
                       Text(
-                        '断网可听',
-                        style: AppType.caption.copyWith(color: t.faint),
+                        '拾声',
+                        textAlign: TextAlign.center,
+                        style: AppType.brand.copyWith(
+                          color: t.text,
+                          letterSpacing: 2,
+                        ),
                       ),
-                      _StartDivider(t: t),
+                      const SizedBox(height: 4),
                       Text(
-                        '无账号',
-                        style: AppType.caption.copyWith(color: t.faint),
+                        '先认识角色，再开始听。',
+                        textAlign: TextAlign.center,
+                        style: AppType.title.copyWith(
+                          color: t.text,
+                          fontSize: 17,
+                        ),
+                      ),
+                      const SizedBox(height: 34),
+                      ClubCard(
+                        color: t.surface,
+                        shadow: 6,
+                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                ClubTag('ON STAGE', color: t.lemon),
+                                const Spacer(),
+                                Text(
+                                  '本机舞台',
+                                  style: AppType.caption.copyWith(
+                                    color: t.muted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              '正在布置舞台',
+                              style: AppType.title.copyWith(color: t.text),
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: LinearProgressIndicator(
+                                color: t.coral,
+                                backgroundColor: t.surfaceAlt,
+                                minHeight: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              Boot.status,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppType.caption.copyWith(
+                                color: t.faint,
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: <Widget>[
+                          ClubTag('角色', color: t.mint),
+                          ClubTag('剧本', color: t.lemon),
+                          ClubTag('试听', color: t.lilac),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -224,22 +283,6 @@ class _RootState extends State<Root> {
       );
     }
     return const AppShell();
-  }
-}
-
-class _StartDivider extends StatelessWidget {
-  final AppTokens t;
-
-  const _StartDivider({required this.t});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 10,
-      margin: const EdgeInsets.symmetric(horizontal: 10),
-      color: t.line,
-    );
   }
 }
 

@@ -22,11 +22,14 @@
 
 ## 字体
 
-`app/assets/fonts/ShishengSerif.otf` / `ShishengSans.otf` 是
-[Source Han Serif SC](https://github.com/adobe-fonts/source-han-serif) 与
+`app/assets/fonts/ShishengSans.otf` 是
 [Source Han Sans SC](https://github.com/adobe-fonts/source-han-sans) 的子集，
 按 SIL Open Font License 1.1 发布，已按 OFL 要求改名为 "Shisheng" 以避开保留字体名（Reserved Font Name "Source"）。
 许可全文：`app/assets/fonts/OFL.txt`。
+
+`app/assets/fonts/ZCOOLKuaiLe-Regular.ttf` 是
+[ZCOOL KuaiLe](https://github.com/googlefonts/zcool-kuaile)，
+按 SIL Open Font License 1.1 发布。许可全文：`app/assets/fonts/ZCOOLKuaiLe-OFL.txt`。
 
 ## 云端音色（默认关闭）
 

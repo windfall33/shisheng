@@ -1,14 +1,14 @@
-// 拾声 v4 · 应用壳：书架 / 最近 / 设置 + 常驻迷你播放器。
+// 拾声 · CAST CLUB 应用壳：阵容 / 剧本 / 试镜 + 常驻迷你播放器。
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'club_screens.dart';
 import 'design.dart';
 import 'globals.dart' show audioPlayer;
 import 'models.dart';
 import 'playback.dart';
 import 'player.dart';
-import 'screens.dart';
 import 'store.dart';
 import 'ui_kit.dart';
 
@@ -21,12 +21,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
-
-  static const List<Widget> _pages = <Widget>[
-    LibraryScreen(),
-    RecentScreen(),
-    SettingsScreen(),
-  ];
 
   @override
   void initState() {
@@ -107,9 +101,16 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
+    final pages = <Widget>[
+      const CastClubScreen(),
+      ScriptBoardScreen(
+        onGoCast: () => setState(() => _index = 0),
+      ),
+      const AuditionScreen(),
+    ];
     return Scaffold(
       backgroundColor: t.bg,
-      body: IndexedStack(index: _index, children: _pages),
+      body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -133,9 +134,9 @@ class AppNavBar extends StatelessWidget {
   const AppNavBar({super.key, required this.selected, required this.onSelected});
 
   static const List<(IconData, String)> _items = <(IconData, String)>[
-    (Icons.auto_stories_outlined, '书架'),
-    (Icons.history_outlined, '最近'),
-    (Icons.settings_outlined, '设置'),
+    (Icons.groups_2_outlined, '阵容'),
+    (Icons.menu_book_outlined, '剧本'),
+    (Icons.graphic_eq_rounded, '试镜'),
   ];
 
   @override
@@ -143,25 +144,28 @@ class AppNavBar extends StatelessWidget {
     final t = AppTokens.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: t.bg,
-        border: Border(top: BorderSide(color: t.line, width: .5)),
+        color: t.surface,
+        border: Border(top: BorderSide(color: t.outline, width: 2)),
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 56,
-          child: Row(
-            children: <Widget>[
-              for (var i = 0; i < _items.length; i++)
-                Expanded(
-                  child: _NavItem(
-                    icon: _items[i].$1,
-                    label: _items[i].$2,
-                    active: i == selected,
-                    onTap: () => onSelected(i),
+          height: 64,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 7, 8, 0),
+            child: Row(
+              children: <Widget>[
+                for (var i = 0; i < _items.length; i++)
+                  Expanded(
+                    child: _NavItem(
+                      icon: _items[i].$1,
+                      label: _items[i].$2,
+                      active: i == selected,
+                      onTap: () => onSelected(i),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -185,7 +189,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    final fg = active ? t.text : t.faint;
+    final fg = active ? t.onAccent : t.faint;
     return Semantics(
       button: true,
       selected: active,
@@ -193,9 +197,28 @@ class _NavItem extends StatelessWidget {
       child: InkResponse(
         onTap: onTap,
         radius: 34,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: active ? t.lemon : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            border: active
+                ? Border.all(color: t.outline, width: 1.8)
+                : null,
+            boxShadow: active
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: t.outline,
+                      offset: const Offset(2, 2),
+                      blurRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
             Icon(icon, size: 20, color: fg),
             const SizedBox(height: 3),
             Text(
@@ -203,7 +226,8 @@ class _NavItem extends StatelessWidget {
               // 字号只取 token 的档位（12/15/17/21/28），不再单开一个 10.5。
               style: AppType.caption.copyWith(color: fg, letterSpacing: .4),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
