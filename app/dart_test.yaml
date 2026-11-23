@@ -1,2 +1,5 @@
 # Golden 走查依赖固定的 390×844 surface 与字体加载；串行执行避免并发抢占。
 concurrency: 1
+
+tags:
+  golden: {}

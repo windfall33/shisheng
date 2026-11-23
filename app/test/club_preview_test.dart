@@ -1,8 +1,6 @@
 @Tags(['golden'])
 library;
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,13 +16,6 @@ import 'package:shisheng_reader/ui_kit.dart';
 
 Future<void> _loadFont(String family, String asset) async {
   final loader = FontLoader(family)..addFont(rootBundle.load(asset));
-  await loader.load();
-}
-
-Future<void> _loadFileFont(String family, String path) async {
-  final bytes = await File(path).readAsBytes();
-  final loader = FontLoader(family)
-    ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
   await loader.load();
 }
 
@@ -127,10 +118,9 @@ void main() {
       'assets/fonts/ZCOOLKuaiLe-Regular.ttf',
     );
     await _loadFont('ShishengSans', 'assets/fonts/ShishengSans.otf');
-    await _loadFileFont(
+    await _loadFont(
       'MaterialIcons',
-      '${Platform.environment['FLUTTER_ROOT'] ?? 'D:/DevTools/flutter'}'
-          '/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
+      'fonts/MaterialIcons-Regular.otf',
     );
   });
 
