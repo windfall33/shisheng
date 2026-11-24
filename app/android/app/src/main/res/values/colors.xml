@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 图标底与启动底色：和 App 的深色画布同一个值（design.dart 的 dark.bg） -->
-    <color name="ic_launcher_background">#0A0A0A</color>
+    <!-- 图标底使用 CAST CLUB 丁香紫；启动底色仍保持深色画布。 -->
+    <color name="ic_launcher_background">#C9B7FF</color>
     <color name="launch_bg">#0A0A0A</color>
 </resources>
