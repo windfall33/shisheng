@@ -2,6 +2,7 @@
 # 书籍正文、合成缓存、日志、打包输出、旧版 Python 服务端与虚拟环境
 /data/
 /dist/
+/build/
 /logs/
 /venv/
 /engines/
