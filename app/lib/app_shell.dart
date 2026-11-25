@@ -81,15 +81,16 @@ class _AppShellState extends State<AppShell> {
               : fmt(np.position),
           progress: progress,
           playing: np.playing,
-          buffering: np.buffering,
+          buffering: np.buffering || np.preparing,
           sleeping: np.sleepAt != null || np.sleepEndOfChapter,
           onTap: _openPlayer,
           onToggle: () {
             if (np.playing) {
               unawaited(audioPlayer.pause());
-            } else if (audioPlayer.audioSource != null) {
+            } else if (audioSourceMatchesChapter(np.book!.bid, np.seq)) {
               unawaited(audioPlayer.play());
             } else {
+              // 当前章还没准备出音源：不要拿旧章的音源继续播。
               _openPlayer();
             }
           },

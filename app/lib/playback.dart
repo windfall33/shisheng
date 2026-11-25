@@ -2,6 +2,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
 import 'globals.dart' show audioPlayer;
 import 'models.dart';
@@ -25,6 +27,10 @@ class NowPlaying extends ChangeNotifier {
   String status = '';
 
   bool get active => book != null;
+  bool get preparing =>
+      status.startsWith('正在准备') ||
+      status.startsWith('正在缓冲') ||
+      status.startsWith('正在合成');
 
   void setBook(BookItem value, int s, String title) {
     book = value;
@@ -121,6 +127,40 @@ class PlaybackSession {
 
   bool owns(Object owner) =>
       _owners.isNotEmpty && identical(_owners.last, owner);
+}
+
+/// 当前 audioPlayer 里装的是不是「这本书这一章」。
+///
+/// 只看 `audioSource != null` 是不够的：切到还没合成的第四章时，旧音源
+/// 仍然是第一章；用户点播放就会「明明在第四集，却响起第一集」。
+bool audioTagMatchesChapter(Object? tag, String bid, int seq) =>
+    tag is MediaItem && tag.id == '$bid:$seq';
+
+bool audioSourceMatchesChapter(String bid, int seq) {
+  final src = audioPlayer.audioSource;
+  return src is UriAudioSource && audioTagMatchesChapter(src.tag, bid, seq);
+}
+
+/// 停掉并清空音源。切到未合成章后，旧章不能再被播放键唤醒。
+Future<void> clearAudioSource() async {
+  try {
+    await audioPlayer.stop();
+  } catch (_) {}
+  try {
+    await audioPlayer.setAudioSources(const <AudioSource>[], preload: false);
+  } catch (_) {}
+}
+
+enum PlaybackTapAction { pause, resume, prepare }
+
+/// 播放键按下去应该做什么：暂停 / 继续当前音源 / 重新准备这一章。
+PlaybackTapAction playbackTapAction({
+  required bool playing,
+  required bool sourceMatches,
+}) {
+  if (playing) return PlaybackTapAction.pause;
+  if (sourceMatches) return PlaybackTapAction.resume;
+  return PlaybackTapAction.prepare;
 }
 
 /// 睡眠定时器独立于播放器页：收起播放器后仍然生效。

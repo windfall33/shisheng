@@ -10,7 +10,7 @@
 
 Android · Flutter · 端侧 TTS · CAST CLUB · 无需账号
 
-[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.2.0
+[下载 APK](https://github.com/windfall33/shisheng/releases/latest) · 当前版本 v1.2.1
 
 </div>
 

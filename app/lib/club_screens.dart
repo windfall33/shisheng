@@ -2255,6 +2255,19 @@ class _ClubNowPlayingBar extends StatelessWidget {
         final progress = total > 0
             ? (np.position.inMilliseconds / total).clamp(0.0, 1.0)
             : 0.0;
+        void openPlayer() {
+          Navigator.of(context).push(
+            playerRoute(
+              PlayerScreen(
+                book: np.book!,
+                startSeq: np.seq,
+                startMs: np.position.inMilliseconds,
+                attach: true,
+              ),
+            ),
+          );
+        }
+
         return SafeArea(
           top: false,
           child: MiniPlayer(
@@ -2265,25 +2278,17 @@ class _ClubNowPlayingBar extends StatelessWidget {
                 : fmt(np.position),
             progress: progress,
             playing: np.playing,
-            buffering: np.buffering,
+            buffering: np.buffering || np.preparing,
             sleeping: np.sleepAt != null || np.sleepEndOfChapter,
-            onTap: () {
-              Navigator.of(context).push(
-                playerRoute(
-                  PlayerScreen(
-                    book: np.book!,
-                    startSeq: np.seq,
-                    startMs: np.position.inMilliseconds,
-                    attach: true,
-                  ),
-                ),
-              );
-            },
+            onTap: openPlayer,
             onToggle: () {
               if (np.playing) {
                 unawaited(audioPlayer.pause());
-              } else if (audioPlayer.audioSource != null) {
+              } else if (audioSourceMatchesChapter(np.book!.bid, np.seq)) {
                 unawaited(audioPlayer.play());
+              } else {
+                // 这一章还没有音源：进播放器页重新准备，别让旧章顶上来。
+                openPlayer();
               }
             },
           ),

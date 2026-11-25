@@ -113,8 +113,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   bool get _isOwner => mounted && PlaybackSession.instance.owns(this);
 
+  // 预览模式没有真音源，但界面画的是「已合成、正在播」的成品状态；
+  // 不能因为拿不到 tag 就把进度条和快进退画成禁用。
   bool get _audioMatches =>
-      _loadedBid == widget.book.bid && _loadedSeq == seq;
+      widget.previewOnly ||
+      (_loadedBid == widget.book.bid &&
+          _loadedSeq == seq &&
+          audioSourceMatchesChapter(widget.book.bid, seq));
 
   @override
   void initState() {
@@ -197,7 +202,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         const Duration(seconds: 5),
         (_) => _loadDetailLoop(seq),
       );
-      if (audioPlayer.audioSource == null) {
+      if (!audioSourceMatchesChapter(widget.book.bid, seq)) {
         unawaited(playChapter(seq, seekMs: now.position.inMilliseconds));
       } else {
         _loadedBid = widget.book.bid;
@@ -214,7 +219,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _subs.add(audioPlayer.positionStream.listen((pos) {
       // 旧页收不到新音源的事件；即使收到，也不许写全局进度。
       if (!_isOwner) return;
-      if (_loadedSeq != null && !_audioMatches) return;
+      if (!_audioMatches) return;
       final tick = DateTime.now();
       if (_lastNpPosition == null ||
           tick.difference(_lastNpPosition!).inMilliseconds >= 500) {
@@ -229,7 +234,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (d != null) now.setDuration(d);
     }));
     _subs.add(audioPlayer.playingStream.listen((playing) {
-      if (!_isOwner) return;
+      // 切章/准备期间旧音源的 stop、play 事件都不算数。
+      if (!_isOwner || _switching) return;
       now.setPlaying(playing);
       if (!playing) {
         // 切章时的 stop 不是「用户暂停」，不能拿它做 5 秒回退。
@@ -412,14 +418,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _pausedAt = null;
     _wasPlaying = false;
     _lastSaveAt = null;
-    waiting = false;
     detailTimer?.cancel();
     setState(() {
       seq = s;
       curSeg = nextSeg = null;
       timeline = <Map<String, dynamic>>[];
+      waiting = true;
     });
     now.setBook(widget.book, s, chapter.title);
+    now.setDuration(Duration.zero);
+    now.setPosition(Duration.zero);
+    now.setPlaying(false);
     now.setStatus('正在准备音频…');
     detailTimer = Timer.periodic(
       const Duration(seconds: 5),
@@ -429,10 +438,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // 先把旧章停掉，再去做任何可能耗时的事（读进度、等引擎、等首块）。
     // 否则等第一集合成的那几十秒里，第三集还在后台响，甚至播完触发续章。
-    try {
-      await audioPlayer.stop();
-    } catch (_) {}
+    await clearAudioSource();
     if (token != playToken || !mounted) return;
+    now.setStatus('正在准备音频…');
 
     if (Boot.preview) {
       await Future<void>.delayed(
@@ -446,6 +454,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
       _switching = false;
+      if (mounted) setState(() => waiting = false);
       return;
     }
 
@@ -472,9 +481,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       }
     }
-
-    setState(() => waiting = true);
-    now.setStatus('正在准备音频…');
 
     final bufferMs = (30000 * speed).round();
     final waitStart = DateTime.now();
@@ -514,7 +520,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           content: Text(
             err != null
                 ? '合成失败了：$err。重启 App 再试，仍不行请告诉我书名'
-                : '90 秒没等到合成结果。点重试再等一轮；反复出现请重启 App 并告诉我',
+                : '120 秒没等到合成结果。点播放再等一轮；反复出现请重启 App 并告诉我',
           ),
         ),
       );
@@ -617,6 +623,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _skip(int seconds) {
+    if (!_audioMatches) return;
     final target = audioPlayer.position + Duration(seconds: seconds);
     unawaited(
       audioPlayer.seek(target < Duration.zero ? Duration.zero : target),
@@ -919,7 +926,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (ctx, snap) {
         final pos = widget.previewOnly
             ? now.position
-            : (waiting ? Duration.zero : (snap.data ?? Duration.zero));
+            : (waiting || !_audioMatches
+                  ? Duration.zero
+                  : (snap.data ?? Duration.zero));
         final totalMs = duration.inMilliseconds;
         final value = totalMs > 0
             ? (pos.inMilliseconds / totalMs).clamp(0.0, 1.0)
@@ -940,7 +949,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
               child: Slider(
                 value: value,
-                onChanged: waiting
+                onChanged: (waiting || !_audioMatches)
                     ? null
                     : (v) => audioPlayer.seek(duration * v),
               ),
@@ -1138,11 +1147,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(width: 26),
                     _MainButton(
                       playing: now.playing,
+                      busy: waiting,
                       onTap: () {
-                        if (now.playing) {
-                          unawaited(audioPlayer.pause());
-                        } else {
-                          unawaited(audioPlayer.play());
+                        if (waiting) return;
+                        switch (playbackTapAction(
+                          playing: now.playing,
+                          sourceMatches: _audioMatches,
+                        )) {
+                          case PlaybackTapAction.pause:
+                            unawaited(audioPlayer.pause());
+                            break;
+                          case PlaybackTapAction.resume:
+                            unawaited(audioPlayer.play());
+                            break;
+                          case PlaybackTapAction.prepare:
+                            unawaited(
+                              playChapter(
+                                seq,
+                                seekMs: now.position.inMilliseconds,
+                              ),
+                            );
+                            break;
                         }
                       },
                     ),
@@ -1410,18 +1435,23 @@ class _ClubReading extends StatelessWidget {
 
 class _MainButton extends StatelessWidget {
   final bool playing;
+  final bool busy;
   final VoidCallback onTap;
 
-  const _MainButton({required this.playing, required this.onTap});
+  const _MainButton({
+    required this.playing,
+    required this.busy,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
     return Semantics(
       button: true,
-      label: playing ? '暂停' : '播放',
+      label: busy ? '正在准备音频' : (playing ? '暂停' : '播放'),
       child: InkResponse(
-        onTap: onTap,
+        onTap: busy ? null : onTap,
         radius: 42,
         child: Container(
           width: 68,
@@ -1438,11 +1468,20 @@ class _MainButton extends StatelessWidget {
               ),
             ],
           ),
-          child: Icon(
-            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            size: 32,
-            color: t.onAccent,
-          ),
+          child: busy
+              ? SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: t.onAccent,
+                  ),
+                )
+              : Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  size: 32,
+                  color: t.onAccent,
+                ),
         ),
       ),
     );

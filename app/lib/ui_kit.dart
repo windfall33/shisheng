@@ -240,7 +240,9 @@ class MiniPlayer extends StatelessWidget {
         tones[trimmed.runes.fold<int>(0, (sum, rune) => sum + rune) % tones.length];
     return Semantics(
       button: true,
-      label: '打开播放页：$title，$chapter',
+      label: buffering && !playing
+          ? '打开播放页，正在准备音频：$title，$chapter'
+          : '打开播放页：$title，$chapter',
       child: Material(
         color: t.surface,
         child: InkWell(
@@ -331,7 +333,9 @@ class MiniPlayer extends StatelessWidget {
                         const SizedBox(width: 6),
                         Semantics(
                           button: true,
-                          label: playing ? '暂停' : '继续播放',
+                          label: buffering && !playing
+                              ? '正在准备音频'
+                              : (playing ? '暂停' : '继续播放'),
                           child: InkWell(
                             onTap: onToggle,
                             customBorder: const CircleBorder(),
